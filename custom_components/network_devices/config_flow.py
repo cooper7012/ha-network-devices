@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import ipaddress
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -31,6 +32,8 @@ from .const import (
 )
 from .coordinator import default_interval
 
+_LOGGER = logging.getLogger(__name__)
+
 PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 
@@ -56,6 +59,7 @@ def router_schema(rtype: str, d: Mapping[str, Any], default_subnets: str = "") -
 
 class NetworkDevicesConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    _detail = ""
 
     async def _validate(self, data: dict[str, Any]) -> str | None:
         from . import async_load_vendor_db, make_backend  # noqa: PLC0415 - avoid import cycle
@@ -68,9 +72,13 @@ class NetworkDevicesConfigFlow(ConfigFlow, domain=DOMAIN):
         await async_load_vendor_db()
         try:
             await make_backend(self.hass, data).async_fetch()
-        except AuthError:
+        except AuthError as err:
+            self._detail = str(err) or "Credentials rejected"
+            _LOGGER.warning("Login to %s failed: %s", data.get(CONF_HOST, "network"), self._detail)
             return "invalid_auth"
-        except BackendError:
+        except BackendError as err:
+            self._detail = str(err) or type(err).__name__
+            _LOGGER.warning("Connecting to %s failed: %s", data.get(CONF_HOST, "network"), self._detail)
             return "cannot_connect"
         return None
 
@@ -111,7 +119,10 @@ class NetworkDevicesConfigFlow(ConfigFlow, domain=DOMAIN):
         defaults = user_input or {}
         subnets = await self._default_subnets() if rtype == "scan" and not defaults else ""
         return self.async_show_form(
-            step_id=rtype, data_schema=router_schema(rtype, defaults, subnets), errors=errors
+            step_id=rtype,
+            data_schema=router_schema(rtype, defaults, subnets),
+            errors=errors,
+            description_placeholders={"error_detail": self._detail},
         )
 
     async def async_step_unifi(self, user_input=None):  # noqa: D102
@@ -154,7 +165,12 @@ class NetworkDevicesConfigFlow(ConfigFlow, domain=DOMAIN):
         if rtype.username is not None:
             fields[vol.Optional(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, ""))] = str
         fields[vol.Required(CONF_PASSWORD)] = PASSWORD
-        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema(fields), errors=errors)
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders={"error_detail": self._detail},
+        )
 
     @staticmethod
     @callback

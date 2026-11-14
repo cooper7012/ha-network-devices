@@ -30,6 +30,7 @@ def build_app() -> web.Application:
     async def root(req): raise web.HTTPFound("/manage")
     async def unifi_login(req):
         b = await req.json()
+        if b["password"] == "mfa": return j({"code": "MFA_AUTH_REQUIRED"}, status=499)
         if b["password"] != "pw": return j({}, status=400)
         resp = j({"data": []}); resp.set_cookie("unifises", "x"); return resp
     unifi = {
@@ -323,3 +324,19 @@ async def test_full_setup_via_ui(hass, enable_custom_integrations, fake_routers,
     for e in hass.config_entries.async_entries("network_devices"):
         assert await hass.config_entries.async_unload(e.entry_id)
     assert "network-devices" not in hass.data["frontend_panels"]
+
+
+async def test_error_details_shown(hass, enable_custom_integrations, fake_routers):
+    """The setup form explains *why* it failed."""
+    assert await async_setup_component(hass, "http", {})
+    r = await hass.config_entries.flow.async_init("network_devices", context={"source": "user"})
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {"next_step_id": "unifi"})
+    base = {**CASES["unifi"][0], "verify_ssl": False}
+    # Nothing listening on this port
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {**base, "port": 18999})
+    assert r["errors"] == {"base": "cannot_connect"}
+    assert "refused" in r["description_placeholders"]["error_detail"].lower()
+    # Account that needs two-factor login (UniFi OS answers 499)
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {**base, "password": "mfa"})
+    assert r["errors"] == {"base": "invalid_auth"}
+    assert "two-factor" in r["description_placeholders"]["error_detail"]

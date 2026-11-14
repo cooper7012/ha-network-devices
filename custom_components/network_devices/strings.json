@@ -118,8 +118,8 @@
       }
     },
     "error": {
-      "invalid_auth": "Invalid credentials.",
-      "cannot_connect": "Could not connect. Check the host, port, HTTPS setting and site.",
+      "invalid_auth": "Login rejected: {error_detail}",
+      "cannot_connect": "Could not connect: {error_detail}",
       "invalid_subnet": "Enter valid subnets like 192.168.1.0/24 (4096 addresses at most)."
     },
     "abort": {

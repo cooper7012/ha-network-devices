@@ -8,7 +8,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNA
 
 from ..const import CONF_SITE
 from ..models import BANDS, make_row
-from .base import TIMEOUT, AuthError, Backend, ConnectError
+from .base import TIMEOUT, AuthError, Backend, ConnectError, describe
 
 import aiohttp
 
@@ -28,19 +28,24 @@ class UniFiBackend(Backend):
                 async with self.session.get(f"{self._base}/", allow_redirects=False, timeout=TIMEOUT) as r:
                     self._is_unifi_os = r.status == 200
             except (aiohttp.ClientError, TimeoutError) as err:
-                raise ConnectError(str(err)) from err
+                raise ConnectError(describe(err)) from err
         path = "/api/auth/login" if self._is_unifi_os else "/api/login"
         payload = {"username": self.data[CONF_USERNAME], "password": self.data[CONF_PASSWORD], "remember": True}
         try:
             async with self.session.post(f"{self._base}{path}", json=payload, timeout=TIMEOUT) as r:
                 if r.status in (400, 401, 403):
                     raise AuthError("Invalid username or password")
+                if r.status == 499:
+                    raise AuthError("This account requires two-factor login. Create a UniFi admin with "
+                                    "'Restrict to Local Access Only' and use that instead")
+                if r.status == 429:
+                    raise ConnectError("Too many login attempts. Wait about 5 minutes and try again")
                 if r.status >= 400:
                     raise ConnectError(f"Login failed: HTTP {r.status}")
                 if token := r.headers.get("x-csrf-token"):
                     self._headers["x-csrf-token"] = token
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise ConnectError(str(err)) from err
+            raise ConnectError(describe(err)) from err
 
     async def _get(self, endpoint: str) -> list[dict[str, Any]]:
         prefix = "/proxy/network" if self._is_unifi_os else ""

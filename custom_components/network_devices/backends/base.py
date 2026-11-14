@@ -1,6 +1,7 @@
 """Backend base class and errors."""
 from __future__ import annotations
 
+import errno
 from typing import Any
 
 import aiohttp
@@ -24,6 +25,23 @@ class AuthError(BackendError):
 
 class ConnectError(BackendError):
     """Device unreachable or unexpected response."""
+
+
+def describe(err: Exception) -> str:
+    """Human-readable reason for a network failure."""
+    if isinstance(err, TimeoutError) or isinstance(err, aiohttp.ServerTimeoutError):
+        return "Timed out. The device didn't answer; check the IP, port and any firewall/VLAN rules"
+    if isinstance(err, aiohttp.ClientConnectorCertificateError):
+        return "SSL certificate rejected; turn off 'Verify SSL certificate'"
+    if isinstance(err, aiohttp.ClientConnectorError):
+        code = getattr(err.os_error, "errno", None)
+        if code == errno.ECONNREFUSED:
+            return f"Connection refused on port {err.port}; check the port number"
+        if code in (errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ETIMEDOUT):
+            return (f"Cannot reach {err.host}:{err.port}. Check the IP, and that your firewall/VLAN "
+                    "rules let Home Assistant reach it")
+        return f"Cannot reach {err.host}:{err.port} ({err.os_error or err})"
+    return f"{type(err).__name__}: {err}"
 
 
 class Backend:
@@ -50,6 +68,6 @@ class Backend:
                     return await resp.json(content_type=None)
                 return await resp.text()
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise ConnectError(f"{type(err).__name__}: {err}") from err
+            raise ConnectError(describe(err)) from err
         except ValueError as err:
             raise ConnectError(f"Unexpected response from {url.split('?')[0]}") from err

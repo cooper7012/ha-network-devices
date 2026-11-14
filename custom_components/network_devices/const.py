@@ -1,7 +1,7 @@
 """Constants for the Network Devices integration."""
 
 DOMAIN = "network_devices"
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 CONF_ROUTER_TYPE = "router_type"
 CONF_SITE = "site"
