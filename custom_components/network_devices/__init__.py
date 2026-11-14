@@ -29,6 +29,7 @@ from .const import (
     VERSION,
 )
 from .coordinator import NetworkDevicesCoordinator
+from .customizations import FILTER_SCHEMA, NAME, TAG, TAGS, async_get_customizations
 from .models import async_load_vendor_db
 from .scanner import NetworkScanner
 
@@ -40,7 +41,10 @@ type NetworkDevicesConfigEntry = ConfigEntry[NetworkDevicesCoordinator]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    websocket_api.async_register_command(hass, ws_list_devices)
+    await async_get_customizations(hass)
+    for command in (ws_list_devices, ws_update_device, ws_rename_tag, ws_delete_tag,
+                    ws_save_filter, ws_delete_filter, ws_set_last_filter):
+        websocket_api.async_register_command(hass, command)
     return True
 
 
@@ -116,7 +120,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 async def ws_list_devices(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return every device found, plus any scan errors."""
+    """Every device found (with custom names/tags), saved filters, and this user's last filter."""
+    custom = await async_get_customizations(hass)
     devices: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -126,7 +131,86 @@ async def ws_list_devices(
         if msg["refresh"]:
             await coordinator.async_refresh()
         for row in coordinator.data or []:
-            devices.setdefault(row["mac"], row)
+            extra = custom.device(row["mac"])
+            devices.setdefault(row["mac"], {**row, "name": extra.get("name", ""), "tags": extra.get("tags", [])})
         if not coordinator.last_update_success and coordinator.last_exception:
             errors.append(str(coordinator.last_exception))
-    connection.send_result(msg["id"], {"devices": list(devices.values()), "errors": errors})
+    connection.send_result(
+        msg["id"],
+        {
+            "devices": list(devices.values()),
+            "errors": errors,
+            "tags": custom.all_tags(),
+            "filters": [{"filter_id": fid, **f} for fid, f in custom.filters.items()],
+            "last_filter": custom.last.get(connection.user.id),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "network_devices/update_device",
+        vol.Required("mac"): vol.All(str, vol.Match(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")),
+        vol.Optional("name"): NAME,
+        vol.Optional("tags"): TAGS,
+    }
+)
+@websocket_api.async_response
+async def ws_update_device(hass, connection, msg) -> None:
+    custom = await async_get_customizations(hass)
+    connection.send_result(msg["id"], custom.update_device(msg["mac"], msg.get("name"), msg.get("tags")))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "network_devices/rename_tag", vol.Required("old"): TAG, vol.Required("new"): TAG}
+)
+@websocket_api.async_response
+async def ws_rename_tag(hass, connection, msg) -> None:
+    (await async_get_customizations(hass)).rename_tag(msg["old"], msg["new"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command({vol.Required("type"): "network_devices/delete_tag", vol.Required("tag"): TAG})
+@websocket_api.async_response
+async def ws_delete_tag(hass, connection, msg) -> None:
+    (await async_get_customizations(hass)).delete_tag(msg["tag"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "network_devices/save_filter",
+        vol.Optional("filter_id"): str,
+        vol.Required("name"): vol.All(str, vol.Strip, vol.Length(min=1, max=64)),
+        vol.Required("filter"): FILTER_SCHEMA,
+    }
+)
+@websocket_api.async_response
+async def ws_save_filter(hass, connection, msg) -> None:
+    custom = await async_get_customizations(hass)
+    connection.send_result(
+        msg["id"], {"filter_id": custom.save_filter(msg["name"], msg["filter"], msg.get("filter_id"))}
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "network_devices/delete_filter", vol.Required("filter_id"): str}
+)
+@websocket_api.async_response
+async def ws_delete_filter(hass, connection, msg) -> None:
+    (await async_get_customizations(hass)).delete_filter(msg["filter_id"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "network_devices/set_last_filter",
+        vol.Required("filter"): FILTER_SCHEMA,
+        vol.Optional("saved_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_set_last_filter(hass, connection, msg) -> None:
+    """Remember what this user had open, so it comes back next time on any browser."""
+    (await async_get_customizations(hass)).set_last(connection.user.id, msg["filter"], msg.get("saved_id"))
+    connection.send_result(msg["id"])

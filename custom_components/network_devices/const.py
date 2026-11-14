@@ -1,7 +1,7 @@
 """Constants for the Network Devices integration."""
 
 DOMAIN = "network_devices"
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 CONF_SUBNETS = "subnets"
 CONF_SCAN_INTERVAL = "scan_interval"

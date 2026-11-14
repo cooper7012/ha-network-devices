@@ -3,10 +3,15 @@
 Adds a **Network Devices** page to the Home Assistant sidebar listing every device on your network.
 It works with **any router**: no router login, API key or controller needed.
 
-| Hostname | MAC Address | Vendor | IP Address | Last Seen |
-|----------|-------------|--------|------------|-----------|
+| Name | MAC Address | Vendor | IP Address | Tags | Last Seen |
+|------|-------------|--------|------------|------|-----------|
 
 - **IP addresses are links**: click one to open `http://<ip>` in a new tab.
+- **Custom names and tags**: click ✎ on any device to name it and tag it (for example *Camera*, *Kitchen*, *IoT*).
+- **Filter by tags**: tick tags in the **Tags** menu and show devices matching *any* or *all* of them, or devices with no tags.
+  Click a tag in the table to filter by it. Tags can be renamed or deleted everywhere at once.
+- **Saved filters**: save the current search, tags, sort and *Show offline* setting under a name and reuse it from the drop-down.
+- **Picks up where you left off**: your last filter is remembered for your Home Assistant user, on any browser or device.
 - Search, sort by any column, and show or hide devices that have gone offline.
 - Remembers devices across restarts, so you can see when something was last online.
 - Adds an `Online devices` sensor you can use in dashboards and automations.
@@ -44,6 +49,9 @@ Home Assistant in Docker needs `network_mode: host`.
 
 *Configure* lets you change the subnets (comma-separated, for example `192.168.1.0/24, 192.168.20.0/24`)
 and the scan interval (default 60 seconds).
+
+Names, tags and saved filters are stored in Home Assistant (`.storage/network_devices.customizations`),
+so they're included in Home Assistant backups.
 
 ## Upgrading from 2.x
 Router-based setups (UniFi, Omada, ASUS…) are converted automatically to a scan of Home Assistant's own network,

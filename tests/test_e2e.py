@@ -6,6 +6,7 @@ import struct
 import pytest
 
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.setup import async_setup_component
 from datetime import timedelta
 
@@ -236,3 +237,73 @@ def test_default_gateway(tmp_path):
                  "eth0\t00000000\t016310AC\t0003\t0\t0\t0\t00000000\n"
                  "eth0\t006310AC\t00000000\t0001\t0\t0\t0\t00FFFFFF\n")
     assert names.default_gateways(str(f)) == ["172.16.99.1"]
+
+
+# --- custom names, tags and filters -----------------------------------------------
+
+async def test_names_tags_and_filters(hass, enable_custom_integrations, fake_net, hass_ws_client,
+                                      hass_admin_user, hass_read_only_user, hass_storage, hass_read_only_access_token):
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain="network_devices", version=2, data={"subnets": "192.168.99.0/24"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    ws = await hass_ws_client(hass)
+    n = iter(range(1, 1000))
+
+    async def call(**msg):
+        await ws.send_json({"id": next(n), **msg})
+        res = await ws.receive_json()
+        assert res["success"], res
+        return res["result"]
+
+    tv = "00:17:88:aa:bb:cc"
+    await call(type="network_devices/update_device", mac=tv, name="  Living Room TV ", tags=["Media", "media", "Upstairs"])
+    await call(type="network_devices/update_device", mac="da:a1:19:00:00:01", tags=["Phones"])
+    res = await call(type="network_devices/list")
+    dev = {d["mac"]: d for d in res["devices"]}
+    assert dev[tv]["name"] == "Living Room TV" and dev[tv]["tags"] == ["Media", "Upstairs"]  # trimmed, de-duplicated
+    assert dev[tv]["hostname"] == "living-room-tv"  # discovered name is kept alongside
+    assert res["tags"] == ["Media", "Phones", "Upstairs"]
+
+    # Bad input is rejected
+    await ws.send_json({"id": next(n), "type": "network_devices/update_device", "mac": "not-a-mac", "name": "x"})
+    assert not (await ws.receive_json())["success"]
+
+    # Saved filters
+    flt = {"query": "tv", "tags": ["Media"], "match": "all", "untagged": False, "show_offline": True, "sort": "name", "dir": -1}
+    fid = (await call(type="network_devices/save_filter", name="Media stuff", filter=flt))["filter_id"]
+    same = (await call(type="network_devices/save_filter", filter_id=fid, name="Media", filter={**flt, "query": ""}))["filter_id"]
+    assert same == fid
+    res = await call(type="network_devices/list")
+    assert res["filters"] == [{"filter_id": fid, "name": "Media", **flt, "query": ""}]
+
+    # Last filter is remembered per user
+    await call(type="network_devices/set_last_filter", filter=flt, saved_id=fid)
+    assert (await call(type="network_devices/list"))["last_filter"] == {**flt, "saved_id": fid}
+    ws2 = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+    await ws2.send_json({"id": 1, "type": "network_devices/list"})
+    assert (await ws2.receive_json())["result"]["last_filter"] is None
+
+    # Rename / delete tags updates devices and saved filters
+    await call(type="network_devices/rename_tag", old="media", new="TV & Audio")
+    res = await call(type="network_devices/list")
+    assert {d["mac"]: d for d in res["devices"]}[tv]["tags"] == ["TV & Audio", "Upstairs"]
+    assert res["filters"][0]["tags"] == ["TV & Audio"] and res["last_filter"]["tags"] == ["TV & Audio"]
+    await call(type="network_devices/delete_tag", tag="Phones")
+    res = await call(type="network_devices/list")
+    assert {d["mac"]: d for d in res["devices"]}["da:a1:19:00:00:01"]["tags"] == []
+
+    # Clearing name and tags removes the stored entry; deleting a saved filter
+    await call(type="network_devices/update_device", mac=tv, name="", tags=[])
+    await call(type="network_devices/delete_filter", filter_id=fid)
+    res = await call(type="network_devices/list")
+    assert res["filters"] == [] and res["tags"] == []
+
+    # Everything is persisted in Home Assistant's storage
+    await call(type="network_devices/update_device", mac=tv, name="TV")
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)  # what a restart does: flush pending saves
+    await hass.async_block_till_done()
+    stored = hass_storage["network_devices.customizations"]["data"]
+    assert stored["devices"] == {tv: {"name": "TV"}}
+    assert stored["last"]  # last-used filter survives restarts
