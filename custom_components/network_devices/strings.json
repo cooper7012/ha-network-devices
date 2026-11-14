@@ -2,146 +2,45 @@
   "config": {
     "step": {
       "user": {
-        "title": "What manages your network?",
-        "description": "Pick your router or controller. If it isn't listed, choose Network scan.",
-        "menu_options": {
-          "unifi": "Ubiquiti UniFi",
-          "omada": "TP-Link Omada",
-          "asus": "ASUS router",
-          "fritzbox": "AVM FRITZ!Box",
-          "openwrt": "OpenWrt",
-          "mikrotik": "MikroTik RouterOS",
-          "opnsense": "OPNsense",
-          "scan": "Network scan (any router)"
-        }
-      },
-      "unifi": {
-        "title": "Ubiquiti UniFi",
-        "description": "UniFi OS consoles (UDM, UDR, UCG, UX, Cloud Key Gen2+) use port 443; self-hosted controllers use 8443. Use a local admin account (View Only is enough), not a ui.com account with 2FA.",
+        "title": "Network Devices",
+        "description": "Home Assistant probes these subnets and lists every device that answers, with its hostname, MAC address, vendor and IP address. Only networks Home Assistant is connected to can be scanned (devices on other VLANs are not visible). Your networks are pre-filled.",
         "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate",
-          "site": "Site ID (usually 'default')"
-        }
-      },
-      "omada": {
-        "title": "TP-Link Omada",
-        "description": "Hardware controllers (OC200/OC300/OC400) use port 443; the Software Controller uses 8043. Use a local controller account (Viewer is enough).",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate",
-          "site": "Site name"
-        }
-      },
-      "asus": {
-        "title": "ASUS router",
-        "description": "Works with stock ASUSWRT and Asuswrt-Merlin, including AiMesh. Use the router's admin login. Turn on HTTPS if the web UI only allows HTTPS (usually port 8443). Shows WiFi, band and channel, but ASUS does not report per-device traffic.",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
-        }
-      },
-      "fritzbox": {
-        "title": "AVM FRITZ!Box",
-        "description": "Requires 'Allow access for applications' under Home Network → Network → Network Settings. Use a FRITZ!Box user (leave the username empty if you log in with password only). Per-device traffic is not available.",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
-        }
-      },
-      "openwrt": {
-        "title": "OpenWrt",
-        "description": "Requires LuCI (installed by default). Log in as root. WiFi, channel and live activity are read from this router's own access points.",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
-        }
-      },
-      "mikrotik": {
-        "title": "MikroTik RouterOS",
-        "description": "RouterOS 7.1+ with the www (port 80) or www-ssl (port 443) service enabled. A read-only user is enough. Live activity comes from WiFi registration counters, and from Kid Control if you use it.",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
-        }
-      },
-      "opnsense": {
-        "title": "OPNsense",
-        "description": "Create an API key under System → Access → Users (edit your user → API keys). Enter the key as the username and the secret as the password.",
-        "data": {
-          "host": "Host (IP address or hostname)",
-          "port": "Port",
-          "username": "API key",
-          "password": "API secret",
-          "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
-        }
-      },
-      "scan": {
-        "title": "Network scan (any router)",
-        "description": "Works with any router. Home Assistant probes the subnet and reads its ARP table, giving name, MAC, vendor and IP. WiFi, channel and activity need one of the router options instead. Home Assistant must be on the same network (Home Assistant OS, or Docker with host networking).",
-        "data": {
-          "subnets": "Subnets to scan (comma separated, e.g. 192.168.1.0/24)"
-        }
-      },
-      "reauth_confirm": {
-        "title": "Re-authenticate",
-        "description": "The login stopped working. Enter the current credentials.",
-        "data": {
-          "username": "Username",
-          "password": "Password"
+          "subnets": "Subnets to scan"
         }
       }
     },
     "error": {
-      "invalid_auth": "Login rejected: {error_detail}",
-      "cannot_connect": "Could not connect: {error_detail}",
-      "invalid_subnet": "Enter valid subnets like 192.168.1.0/24 (4096 addresses at most)."
+      "invalid_subnet": "Enter subnets like 192.168.1.0/24, separated by commas (4096 addresses at most).",
+      "not_local": "Home Assistant isn't connected to {remote}, so it can't see devices there (MAC addresses don't cross routers). Home Assistant is on: {local}.",
+      "scan_failed": "Scanning failed: {detail}",
+      "no_devices": "No devices answered. If Home Assistant runs in Docker, it needs network_mode: host."
     },
     "abort": {
-      "already_configured": "This is already configured.",
-      "reauth_successful": "Re-authentication successful."
+      "single_instance_allowed": "Network Devices is already set up. Use Configure to change the subnets."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Network Devices options",
+        "description": "Home Assistant probes these subnets and lists every device that answers, with its hostname, MAC address, vendor and IP address. Only networks Home Assistant is connected to can be scanned (devices on other VLANs are not visible). Your networks are pre-filled.",
         "data": {
-          "scan_interval": "Refresh interval (seconds)",
-          "swap_direction": "Swap upload/download (enable if they look reversed)"
+          "subnets": "Subnets to scan",
+          "scan_interval": "Scan interval (seconds)"
         }
       }
+    },
+    "error": {
+      "invalid_subnet": "Enter subnets like 192.168.1.0/24, separated by commas (4096 addresses at most).",
+      "not_local": "Home Assistant isn't connected to {remote}, so it can't see devices there (MAC addresses don't cross routers). Home Assistant is on: {local}.",
+      "scan_failed": "Scanning failed: {detail}",
+      "no_devices": "No devices answered. If Home Assistant runs in Docker, it needs network_mode: host."
     }
   },
   "entity": {
     "sensor": {
-      "connected_clients": {
-        "name": "Connected clients"
+      "online_devices": {
+        "name": "Online devices"
       }
     }
   }

@@ -1,25 +1,23 @@
 """Network Devices: list every device on your network in a sidebar panel."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import CONF_VERIFY_SSL, Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.typing import ConfigType
 
-from .backends import ROUTER_TYPES
-from .backends.base import Backend
+from .config_flow import async_default_subnets
 from .const import (
-    CONF_ROUTER_TYPE,
+    CONF_SUBNETS,
     DATA_PANEL_REGISTERED,
     DATA_STATIC_REGISTERED,
     DOMAIN,
@@ -31,33 +29,14 @@ from .const import (
     VERSION,
 )
 from .coordinator import NetworkDevicesCoordinator
+from .models import async_load_vendor_db
+from .scanner import NetworkScanner
 
+_LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type NetworkDevicesConfigEntry = ConfigEntry[NetworkDevicesCoordinator]
-
-
-def make_backend(hass: HomeAssistant, data: dict[str, Any]) -> Backend:
-    rtype = ROUTER_TYPES[data.get(CONF_ROUTER_TYPE, "unifi")]
-    session = async_create_clientsession(
-        hass,
-        verify_ssl=data.get(CONF_VERIFY_SSL, False),
-        cookie_jar=aiohttp.CookieJar(unsafe=True),  # needed for cookies on bare IPs
-    )
-    return rtype.backend(hass, session, data)
-
-
-async def async_load_vendor_db() -> None:
-    try:
-        import aiooui  # noqa: PLC0415
-    except ImportError:
-        return
-    if not aiooui.is_loaded():
-        try:
-            await aiooui.async_load()
-        except Exception:  # noqa: BLE001 - vendor names are a nice-to-have
-            pass
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -65,9 +44,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """v1/v2.x entries talked to a router; v3 scans the local network instead."""
+    if entry.version == 1:
+        subnets = entry.data.get(CONF_SUBNETS) or await async_default_subnets(hass)
+        hass.config_entries.async_update_entry(
+            entry, data={CONF_SUBNETS: subnets}, options={}, title="Network Devices", unique_id=None, version=2
+        )
+        _LOGGER.info("Network Devices now scans %s directly; router settings were removed", subnets)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: NetworkDevicesConfigEntry) -> bool:
     await async_load_vendor_db()
-    coordinator = NetworkDevicesCoordinator(hass, entry, make_backend(hass, dict(entry.data)))
+    coordinator = NetworkDevicesCoordinator(hass, entry, NetworkScanner(hass, entry.entry_id, entry.data[CONF_SUBNETS]))
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 
@@ -91,6 +81,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: NetworkDevicesConfigEnt
     if unloaded and not others and hass.data.pop(DATA_PANEL_REGISTERED, False):
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Forget the saved device list when the integration is deleted."""
+    await NetworkScanner(hass, entry.entry_id, entry.data.get(CONF_SUBNETS) or "127.0.0.0/30").async_remove_store()
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -121,9 +116,9 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 async def ws_list_devices(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return all devices from every configured controller/site."""
-    devices: list[dict[str, Any]] = []
-    sources: list[dict[str, Any]] = []
+    """Return every device found, plus any scan errors."""
+    devices: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.state is not ConfigEntryState.LOADED:
             continue
@@ -131,14 +126,7 @@ async def ws_list_devices(
         if msg["refresh"]:
             await coordinator.async_refresh()
         for row in coordinator.data or []:
-            devices.append({**row, "source": entry.title})
-        sources.append(
-            {
-                "title": entry.title,
-                "ok": coordinator.last_update_success,
-                "error": str(coordinator.last_exception)
-                if not coordinator.last_update_success and coordinator.last_exception
-                else None,
-            }
-        )
-    connection.send_result(msg["id"], {"devices": devices, "sources": sources})
+            devices.setdefault(row["mac"], row)
+        if not coordinator.last_update_success and coordinator.last_exception:
+            errors.append(str(coordinator.last_exception))
+    connection.send_result(msg["id"], {"devices": list(devices.values()), "errors": errors})

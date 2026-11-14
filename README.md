@@ -1,69 +1,52 @@
 # Network Devices for Home Assistant
 
-Adds a **Network Devices** page to the Home Assistant sidebar that lists every device on your network:
+Adds a **Network Devices** page to the Home Assistant sidebar listing every device on your network.
+It works with **any router**: no router login, API key or controller needed.
 
-| Name | MAC Address | Vendor | Connection | Network | WiFi | Channel | IP Address | Activity |
-|------|-------------|--------|------------|---------|------|---------|------------|----------|
+| Hostname | MAC Address | Vendor | IP Address | Last Seen |
+|----------|-------------|--------|------------|-----------|
 
 - **IP addresses are links**: click one to open `http://<ip>` in a new tab.
-- Live upload and download per device, where your router reports it.
-- Search, sort by any column, filter WiFi or wired, and show or hide offline devices.
-- Combine several routers, controllers or sites into one list.
-- Adds a `Connected clients` sensor, with wired/wireless counts and total throughput as attributes.
+- Search, sort by any column, and show or hide devices that have gone offline.
+- Remembers devices across restarts, so you can see when something was last online.
+- Adds an `Online devices` sensor you can use in dashboards and automations.
 
-## Supported routers and controllers
+## How it works
+Every minute, Home Assistant sends a tiny packet to each address on your network, then reads which devices
+answered from its own ARP table:
+- **Hostname** comes from reverse DNS. Most routers, including UniFi, answer with the name the device gave when it joined.
+- **Vendor** comes from the MAC address, using the vendor database that ships with Home Assistant.
+  Phones and tablets that use a private (randomized) MAC address are labelled *Private (random MAC)*.
 
-| | WiFi / Channel | Live activity | Connection | Vendor |
-|---|:-:|:-:|---|:-:|
-| **Ubiquiti UniFi** (UDM, UDR, UCG, UX, Cloud Key, self-hosted) | ✅ | ✅ | AP / switch port | ✅ |
-| **TP-Link Omada** (OC200/300/400, Software Controller) | ✅ | ✅ | AP / switch port | ✅ |
-| **ASUS** (ASUSWRT, Asuswrt-Merlin, AiMesh) | ✅ | — | Router / AiMesh node | ✅ |
-| **AVM FRITZ!Box** | ✅ | — | WiFi / LAN port | ✅ |
-| **OpenWrt** | ✅ | ✅ WiFi clients | Interface | ✅ |
-| **MikroTik RouterOS 7** | ✅ | ✅ WiFi clients (all clients with Kid Control) | Bridge port | ✅ |
-| **OPNsense** | — | ✅ | Interface | ✅ |
-| **Network scan**: any other router (Netgear, eero, Google/Nest, ISP routers…) | — | — | — | ✅ |
+### Limitation: one network (VLAN) at a time
+MAC addresses don't cross routers, so Home Assistant only sees devices on networks it is **directly connected to**.
+If your devices are spread over several VLANs, either:
+- give Home Assistant an interface on each VLAN (Home Assistant OS: *Settings → System → Network*, or `ha network vlan`;
+  the switch port must carry those VLANs), or
+- accept that only Home Assistant's own VLAN is listed.
 
-Vendor names come from the router where it provides them, otherwise from a built-in MAC address database.
-Devices using a private (randomized) MAC address are labelled as such.
+Home Assistant in Docker needs `network_mode: host`.
 
 ## Install
 
-**HACS (recommended)**
+**Home Assistant Marketplace (or HACS)**
+1. *Settings → Marketplace → ⋮ → Custom repositories* (in HACS: *⋮ → Custom repositories*).
+2. Add `https://github.com/cooper7012/ha-network-devices` as an **Integration**.
+3. Download **Network Devices**, then restart Home Assistant.
 
-[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cooper7012&repository=ha-network-devices&category=integration)
-
-Or add it by hand:
-1. In HACS, open the ⋮ menu and choose **Custom repositories**.
-2. Add `https://github.com/cooper7012/ha-network-devices` with type **Integration**.
-3. Search for **Network Devices**, download it, then restart Home Assistant.
-
-**Manually**
-1. Copy `custom_components/network_devices` into your Home Assistant `config/custom_components/` folder.
-2. Restart Home Assistant.
+**Manually**: copy `custom_components/network_devices` into `config/custom_components/` and restart.
 
 ## Set up
-Go to *Settings → Devices & Services → Add Integration → Network Devices* and pick what runs your network.
-You can add the integration more than once, for example a router plus a separate WiFi controller.
+*Settings → Devices & Services → Add Integration → Network Devices.* Your network is pre-filled, so just click **Submit**.
 
-| Router | What you need |
-|---|---|
-| UniFi | A **local** UniFi account (View Only is enough). Port 443 for consoles, 8443 for self-hosted. Site ID is usually `default`. |
-| Omada | A local controller account (Viewer is enough). Port 443 for OC200/300/400, 8043 for the Software Controller. |
-| ASUS | The router's admin login. Port 80, or turn on HTTPS (often port 8443) if the web UI is HTTPS-only. |
-| FRITZ!Box | Turn on *Home Network → Network → Network Settings → Allow access for applications*. Port 49000. Leave the username empty if you log in with a password only. |
-| OpenWrt | `root` and its password. LuCI must be installed (it is by default). |
-| MikroTik | RouterOS 7.1+ with *IP → Services → www* (80) or *www-ssl* (443) enabled. A read-only user works. |
-| OPNsense | An API key and secret (*System → Access → Users → edit user → API keys*). Enter the key as the username and the secret as the password. |
-| Network scan | Just the subnet(s), which are pre-filled. Home Assistant must be on the same network (Home Assistant OS, or Docker with `network_mode: host`). |
+*Configure* lets you change the subnets (comma-separated, for example `192.168.1.0/24, 192.168.20.0/24`)
+and the scan interval (default 60 seconds).
 
-## Options
-*Settings → Devices & Services → Network Devices → Configure*:
-- **Refresh interval**: how often to poll (default 15 s, or 60 s for a network scan).
-- **Swap upload/download**: if the arrows look reversed for your router, turn this on.
+## Upgrading from 2.x
+Router-based setups (UniFi, Omada, ASUS…) are converted automatically to a scan of Home Assistant's own network,
+and their stored router credentials are deleted.
 
 ## Development
-Tests use fake versions of every router API:
 ```bash
 pip install pytest-homeassistant-custom-component
 pytest

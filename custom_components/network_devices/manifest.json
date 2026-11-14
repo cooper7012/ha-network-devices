@@ -18,5 +18,6 @@
   "requirements": [
     "aiooui>=0.1.9"
   ],
-  "version": "2.0.1"
+  "single_config_entry": true,
+  "version": "3.0.0"
 }

@@ -1,16 +1,14 @@
 """Constants for the Network Devices integration."""
 
 DOMAIN = "network_devices"
-VERSION = "2.0.1"
+VERSION = "3.0.0"
 
-CONF_ROUTER_TYPE = "router_type"
-CONF_SITE = "site"
 CONF_SUBNETS = "subnets"
 CONF_SCAN_INTERVAL = "scan_interval"
-CONF_SWAP_DIRECTION = "swap_direction"
 
-DEFAULT_SCAN_INTERVAL = 15  # seconds
-DEFAULT_SCAN_INTERVAL_NETWORK_SCAN = 60
+DEFAULT_SCAN_INTERVAL = 60  # seconds
+MAX_ADDRESSES = 4096
+HOSTNAME_REFRESH = 1800  # re-resolve hostnames every 30 minutes
 
 PANEL_URL_PATH = "network-devices"
 PANEL_COMPONENT = "network-devices-panel"
