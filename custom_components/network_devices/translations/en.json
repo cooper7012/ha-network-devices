@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your UniFi controller",
+        "description": "Use a local UniFi account (not a ui.com account with 2FA). A read-only 'View Only' admin is enough.",
+        "data": {
+          "host": "Host (IP or hostname of the console/controller)",
+          "port": "Port (443 for UDM/UDR/UCG/Cloud Key, 8443 for self-hosted controllers)",
+          "username": "Username",
+          "password": "Password",
+          "site": "Site ID (usually 'default')",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate with UniFi",
+        "data": { "username": "Username", "password": "Password" }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid username or password.",
+      "cannot_connect": "Could not connect to the controller. Check host, port and site."
+    },
+    "abort": {
+      "already_configured": "This controller and site are already configured.",
+      "reauth_successful": "Re-authentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Network Devices options",
+        "data": {
+          "scan_interval": "Refresh interval (seconds)",
+          "swap_direction": "Swap upload/download (enable if they look reversed)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "connected_clients": { "name": "Connected clients" }
+    }
+  }
+}
