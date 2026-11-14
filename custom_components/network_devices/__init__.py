@@ -1,4 +1,4 @@
-"""Network Devices: list every client on a UniFi network in a sidebar panel."""
+"""Network Devices: list every device on your network in a sidebar panel."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,22 +10,16 @@ import voluptuous as vol
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import (
-    CONF_HOST,
-    CONF_PASSWORD,
-    CONF_PORT,
-    CONF_USERNAME,
-    CONF_VERIFY_SSL,
-    Platform,
-)
+from homeassistant.const import CONF_VERIFY_SSL, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.typing import ConfigType
 
-from .api import UniFiClient
+from .backends import ROUTER_TYPES
+from .backends.base import Backend
 from .const import (
-    CONF_SITE,
+    CONF_ROUTER_TYPE,
     DATA_PANEL_REGISTERED,
     DATA_STATIC_REGISTERED,
     DOMAIN,
@@ -44,20 +38,26 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 type NetworkDevicesConfigEntry = ConfigEntry[NetworkDevicesCoordinator]
 
 
-def make_client(hass: HomeAssistant, data: dict[str, Any]) -> UniFiClient:
+def make_backend(hass: HomeAssistant, data: dict[str, Any]) -> Backend:
+    rtype = ROUTER_TYPES[data.get(CONF_ROUTER_TYPE, "unifi")]
     session = async_create_clientsession(
         hass,
         verify_ssl=data.get(CONF_VERIFY_SSL, False),
         cookie_jar=aiohttp.CookieJar(unsafe=True),  # needed for cookies on bare IPs
     )
-    return UniFiClient(
-        session,
-        data[CONF_HOST],
-        data[CONF_PORT],
-        data[CONF_USERNAME],
-        data[CONF_PASSWORD],
-        data[CONF_SITE],
-    )
+    return rtype.backend(hass, session, data)
+
+
+async def async_load_vendor_db() -> None:
+    try:
+        import aiooui  # noqa: PLC0415
+    except ImportError:
+        return
+    if not aiooui.is_loaded():
+        try:
+            await aiooui.async_load()
+        except Exception:  # noqa: BLE001 - vendor names are a nice-to-have
+            pass
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -66,7 +66,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NetworkDevicesConfigEntry) -> bool:
-    coordinator = NetworkDevicesCoordinator(hass, entry, make_client(hass, dict(entry.data)))
+    await async_load_vendor_db()
+    coordinator = NetworkDevicesCoordinator(hass, entry, make_backend(hass, dict(entry.data)))
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 

@@ -1,15 +1,31 @@
-# Network Devices (UniFi) for Home Assistant
+# Network Devices for Home Assistant
 
-Adds a **Network Devices** page to the Home Assistant sidebar that lists every client on your UniFi network:
+Adds a **Network Devices** page to the Home Assistant sidebar that lists every device on your network:
 
 | Name | MAC Address | Vendor | Connection | Network | WiFi | Channel | IP Address | Activity |
 |------|-------------|--------|------------|---------|------|---------|------------|----------|
 
 - **IP addresses are links**: click one to open `http://<ip>` in a new tab.
-- Live upload and download rates per device, refreshed every 5 seconds in the panel.
-- Search, sort by any column, filter WiFi or wired, and show or hide offline (known) devices.
-- Creates a `Connected clients` sensor, with wired/wireless counts and total throughput as attributes.
-- Works with UniFi OS consoles (UDM, UDR, UCG, UX, Cloud Key Gen2+) and self-hosted UniFi Network controllers.
+- Live upload and download per device, where your router reports it.
+- Search, sort by any column, filter WiFi or wired, and show or hide offline devices.
+- Combine several routers, controllers or sites into one list.
+- Adds a `Connected clients` sensor, with wired/wireless counts and total throughput as attributes.
+
+## Supported routers and controllers
+
+| | WiFi / Channel | Live activity | Connection | Vendor |
+|---|:-:|:-:|---|:-:|
+| **Ubiquiti UniFi** (UDM, UDR, UCG, UX, Cloud Key, self-hosted) | ✅ | ✅ | AP / switch port | ✅ |
+| **TP-Link Omada** (OC200/300/400, Software Controller) | ✅ | ✅ | AP / switch port | ✅ |
+| **ASUS** (ASUSWRT, Asuswrt-Merlin, AiMesh) | ✅ | — | Router / AiMesh node | ✅ |
+| **AVM FRITZ!Box** | ✅ | — | WiFi / LAN port | ✅ |
+| **OpenWrt** | ✅ | ✅ WiFi clients | Interface | ✅ |
+| **MikroTik RouterOS 7** | ✅ | ✅ WiFi clients (all clients with Kid Control) | Bridge port | ✅ |
+| **OPNsense** | — | ✅ | Interface | ✅ |
+| **Network scan**: any other router (Netgear, eero, Google/Nest, ISP routers…) | — | — | — | ✅ |
+
+Vendor names come from the router where it provides them, otherwise from a built-in MAC address database.
+Devices using a private (randomized) MAC address are labelled as such.
 
 ## Install
 
@@ -20,30 +36,35 @@ Adds a **Network Devices** page to the Home Assistant sidebar that lists every c
 Or add it by hand:
 1. In HACS, open the ⋮ menu and choose **Custom repositories**.
 2. Add `https://github.com/cooper7012/ha-network-devices` with type **Integration**.
-3. Search for **Network Devices (UniFi)**, download it, then restart Home Assistant.
+3. Search for **Network Devices**, download it, then restart Home Assistant.
 
 **Manually**
 1. Copy `custom_components/network_devices` into your Home Assistant `config/custom_components/` folder.
-   (Use the Samba share, the File editor / Studio Code Server add-on, or `scp`.)
 2. Restart Home Assistant.
 
 ## Set up
-1. In UniFi, create a **local** admin (*Settings → Admins & Users → Add*: "Restrict to local access only").
-   The *View Only* role is enough. A ui.com cloud account with 2FA will not work.
-2. In Home Assistant, go to *Settings → Devices & Services → Add Integration → Network Devices (UniFi)*.
-3. Enter:
-   - **Host**: your console's IP, for example `192.168.1.1`.
-   - **Port**: `443` for UniFi OS consoles, `8443` for a self-hosted controller.
-   - **Site ID**: `default` unless you have several sites. The ID is in the controller URL (`/manage/<site>/...`).
-   - **Verify SSL**: leave it off if the console uses its built-in self-signed certificate.
-4. **Network Devices** now appears in the sidebar.
+Go to *Settings → Devices & Services → Add Integration → Network Devices* and pick what runs your network.
+You can add the integration more than once, for example a router plus a separate WiFi controller.
+
+| Router | What you need |
+|---|---|
+| UniFi | A **local** UniFi account (View Only is enough). Port 443 for consoles, 8443 for self-hosted. Site ID is usually `default`. |
+| Omada | A local controller account (Viewer is enough). Port 443 for OC200/300/400, 8043 for the Software Controller. |
+| ASUS | The router's admin login. Port 80, or turn on HTTPS (often port 8443) if the web UI is HTTPS-only. |
+| FRITZ!Box | Turn on *Home Network → Network → Network Settings → Allow access for applications*. Port 49000. Leave the username empty if you log in with a password only. |
+| OpenWrt | `root` and its password. LuCI must be installed (it is by default). |
+| MikroTik | RouterOS 7.1+ with *IP → Services → www* (80) or *www-ssl* (443) enabled. A read-only user works. |
+| OPNsense | An API key and secret (*System → Access → Users → edit user → API keys*). Enter the key as the username and the secret as the password. |
+| Network scan | Just the subnet(s), which are pre-filled. Home Assistant must be on the same network (Home Assistant OS, or Docker with `network_mode: host`). |
 
 ## Options
 *Settings → Devices & Services → Network Devices → Configure*:
-- **Refresh interval**: how often to poll the controller (default 15 s).
-- **Swap upload/download**: UniFi reports traffic from the access point's point of view
-  (AP transmit = client download). If the arrows look reversed on your firmware, turn this on.
+- **Refresh interval**: how often to poll (default 15 s, or 60 s for a network scan).
+- **Swap upload/download**: if the arrows look reversed for your router, turn this on.
 
-## Notes
-- You can add several controllers or sites. The panel merges them into one list.
-- Links open `http://<ip>`. Devices that only serve HTTPS usually redirect there automatically.
+## Development
+Tests use fake versions of every router API:
+```bash
+pip install pytest-homeassistant-custom-component
+pytest
+```

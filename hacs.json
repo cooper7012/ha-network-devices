@@ -1,5 +1,5 @@
 {
-  "name": "Network Devices (UniFi)",
+  "name": "Network Devices",
   "render_readme": true,
   "homeassistant": "2024.11.0"
 }

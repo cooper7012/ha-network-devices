@@ -2,28 +2,128 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to your UniFi controller",
-        "description": "Use a local UniFi account (not a ui.com account with 2FA). A read-only 'View Only' admin is enough.",
+        "title": "What manages your network?",
+        "description": "Pick your router or controller. If it isn't listed, choose Network scan.",
+        "menu_options": {
+          "unifi": "Ubiquiti UniFi",
+          "omada": "TP-Link Omada",
+          "asus": "ASUS router",
+          "fritzbox": "AVM FRITZ!Box",
+          "openwrt": "OpenWrt",
+          "mikrotik": "MikroTik RouterOS",
+          "opnsense": "OPNsense",
+          "scan": "Network scan (any router)"
+        }
+      },
+      "unifi": {
+        "title": "Ubiquiti UniFi",
+        "description": "UniFi OS consoles (UDM, UDR, UCG, UX, Cloud Key Gen2+) use port 443; self-hosted controllers use 8443. Use a local admin account (View Only is enough), not a ui.com account with 2FA.",
         "data": {
-          "host": "Host (IP or hostname of the console/controller)",
-          "port": "Port (443 for UDM/UDR/UCG/Cloud Key, 8443 for self-hosted controllers)",
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
           "username": "Username",
           "password": "Password",
-          "site": "Site ID (usually 'default')",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate",
+          "site": "Site ID (usually 'default')"
+        }
+      },
+      "omada": {
+        "title": "TP-Link Omada",
+        "description": "Hardware controllers (OC200/OC300/OC400) use port 443; the Software Controller uses 8043. Use a local controller account (Viewer is enough).",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate",
+          "site": "Site name"
+        }
+      },
+      "asus": {
+        "title": "ASUS router",
+        "description": "Works with stock ASUSWRT and Asuswrt-Merlin, including AiMesh. Use the router's admin login. Turn on HTTPS if the web UI only allows HTTPS (usually port 8443). Shows WiFi, band and channel, but ASUS does not report per-device traffic.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use HTTPS",
           "verify_ssl": "Verify SSL certificate"
         }
       },
+      "fritzbox": {
+        "title": "AVM FRITZ!Box",
+        "description": "Requires 'Allow access for applications' under Home Network → Network → Network Settings. Use a FRITZ!Box user (leave the username empty if you log in with password only). Per-device traffic is not available.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "openwrt": {
+        "title": "OpenWrt",
+        "description": "Requires LuCI (installed by default). Log in as root. WiFi, channel and live activity are read from this router's own access points.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "mikrotik": {
+        "title": "MikroTik RouterOS",
+        "description": "RouterOS 7.1+ with the www (port 80) or www-ssl (port 443) service enabled. A read-only user is enough. Live activity comes from WiFi registration counters, and from Kid Control if you use it.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "opnsense": {
+        "title": "OPNsense",
+        "description": "Create an API key under System → Access → Users (edit your user → API keys). Enter the key as the username and the secret as the password.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port",
+          "username": "API key",
+          "password": "API secret",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "scan": {
+        "title": "Network scan (any router)",
+        "description": "Works with any router. Home Assistant probes the subnet and reads its ARP table, giving name, MAC, vendor and IP. WiFi, channel and activity need one of the router options instead. Home Assistant must be on the same network (Home Assistant OS, or Docker with host networking).",
+        "data": {
+          "subnets": "Subnets to scan (comma separated, e.g. 192.168.1.0/24)"
+        }
+      },
       "reauth_confirm": {
-        "title": "Re-authenticate with UniFi",
-        "data": { "username": "Username", "password": "Password" }
+        "title": "Re-authenticate",
+        "description": "The login stopped working. Enter the current credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Invalid username or password.",
-      "cannot_connect": "Could not connect to the controller. Check host, port and site."
+      "invalid_auth": "Invalid credentials.",
+      "cannot_connect": "Could not connect. Check the host, port, HTTPS setting and site.",
+      "invalid_subnet": "Enter valid subnets like 192.168.1.0/24 (4096 addresses at most)."
     },
     "abort": {
-      "already_configured": "This controller and site are already configured.",
+      "already_configured": "This is already configured.",
       "reauth_successful": "Re-authentication successful."
     }
   },
@@ -40,7 +140,9 @@
   },
   "entity": {
     "sensor": {
-      "connected_clients": { "name": "Connected clients" }
+      "connected_clients": {
+        "name": "Connected clients"
+      }
     }
   }
 }

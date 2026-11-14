@@ -8,6 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .backends import ROUTER_TYPES
+from .const import CONF_ROUTER_TYPE
 from .coordinator import NetworkDevicesCoordinator
 
 
@@ -29,8 +31,8 @@ class ConnectedClientsSensor(CoordinatorEntity[NetworkDevicesCoordinator], Senso
         self._attr_device_info = {
             "identifiers": {("network_devices", entry.entry_id)},
             "name": entry.title,
-            "manufacturer": "Ubiquiti",
-            "model": "UniFi Network",
+            "manufacturer": "Network Devices",
+            "model": ROUTER_TYPES[entry.data.get(CONF_ROUTER_TYPE, "unifi")].label,
         }
 
     @property

@@ -217,18 +217,21 @@ class NetworkDevicesPanel extends HTMLElement {
     const ip = d.ip
       ? `<a class="ip mono" href="http://${esc(d.ip)}" target="_blank" rel="noopener noreferrer">${esc(d.ip)}</a>`
       : "";
-    const connIcon = d.connection_type === "wired" ? "mdi:ethernet" : "mdi:wifi";
+    const connIcon = { wired: "mdi:ethernet", wireless: "mdi:wifi" }[d.connection_type] || "mdi:lan-connect";
     const channel = d.channel != null ? `${esc(d.channel)}<div class="sub">${esc(d.band)}</div>` : "";
-    const activity = d.online
-      ? `<div class="act"><span>↓</span><span>${fmtRate(d.download)}</span><span>↑</span><span>${fmtRate(d.upload)}</span></div>`
-      : `<span class="sub">${esc(fmtAgo(d.seconds_since_seen))}</span>`;
+    const activity = !d.online
+      ? `<span class="sub">${esc(fmtAgo(d.seconds_since_seen))}</span>`
+      : d.download == null && d.upload == null
+      ? `<span class="sub" title="This router doesn't report per-device traffic">—</span>`
+      : `<div class="act"><span>↓</span><span>${fmtRate(d.download)}</span><span>↑</span><span>${fmtRate(d.upload)}</span></div>`;
     const signal = d.signal != null ? `<div class="sub">${esc(d.signal)} dBm</div>` : "";
     const sub = d.hostname && d.hostname !== d.name ? `<div class="sub">${esc(d.hostname)}</div>` : "";
+    const src = this._multiSource ? `<div class="sub">${esc(d.source)}</div>` : "";
     return `<tr class="${d.online ? "" : "offline"}">
       <td><div class="name"><span class="dot"></span><div>${esc(d.name)}${sub}</div></div></td>
       <td class="mono">${esc(d.mac)}</td>
       <td>${esc(d.vendor)}</td>
-      <td><div class="name" style="font-weight:400"><ha-icon icon="${connIcon}"></ha-icon><div>${esc(d.connection)}${signal}</div></div></td>
+      <td><div class="name" style="font-weight:400"><ha-icon icon="${connIcon}"></ha-icon><div>${esc(d.connection)}${signal}${src}</div></div></td>
       <td>${esc(d.network)}</td>
       <td>${esc(d.wifi)}</td>
       <td>${channel}</td>
@@ -249,6 +252,7 @@ class NetworkDevicesPanel extends HTMLElement {
     const online = this._devices.filter((d) => d.online);
     const down = online.reduce((t, d) => t + (d.download || 0), 0);
     const up = online.reduce((t, d) => t + (d.upload || 0), 0);
+    this._multiSource = this._sources.length > 1;
     const rows = this._rows();
     $("stats").innerHTML = `
       <span><b>${online.length}</b> online</span>
