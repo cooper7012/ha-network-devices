@@ -1,5 +1,7 @@
 """Tests for the network-scan version of Network Devices."""
+import asyncio
 import ipaddress
+import struct
 
 import pytest
 
@@ -37,11 +39,12 @@ def fake_net(monkeypatch, tmp_path):
     async def no_sleep(_):
         return None
 
-    async def resolve(ip):
-        return (names.get(ip) or "").split(".")[0]
+    async def find_names(hass, devices):
+        return {mac: (names[ip].split(".")[0], "DNS") for mac, ip in devices.items() if names.get(ip)}
 
     monkeypatch.setattr(scanner.asyncio, "sleep", no_sleep)
-    monkeypatch.setattr(scanner, "resolve_hostname", resolve)
+    monkeypatch.setattr(scanner, "async_find_names", find_names)
+    monkeypatch.setattr(scanner, "dhcp_names", lambda hass: {})
 
     async def local(hass):
         return LAN
@@ -144,3 +147,92 @@ async def test_old_unifi_entry_is_migrated(hass, enable_custom_integrations, fak
     assert old.state is ConfigEntryState.LOADED
     assert old.version == 2 and old.data == {"subnets": "192.168.99.0/24"} and old.options == {}
     assert "password" not in old.data
+
+
+# --- hostname lookups -----------------------------------------------------------
+
+from custom_components.network_devices import names  # noqa: E402
+
+
+def dns_reply(query: bytes, target: str) -> bytes:
+    """Answer a PTR query the way a real DNS/mDNS server does (with name compression)."""
+    txid = query[:2]
+    question = query[12:]
+    rdata = b"".join(bytes([len(p)]) + p.encode() for p in target.split(".")) + b"\x00"
+    answer = b"\xc0\x0c" + struct.pack(">HHIH", 12, 1, 120, len(rdata)) + rdata
+    return txid + struct.pack(">HHHHH", 0x8180, 1, 1, 0, 0) + question + answer
+
+
+def nbstat_reply(name: str) -> bytes:
+    entries = (b"WORKGROUP".ljust(15) + b"\x00" + struct.pack(">H", 0x8400)  # group name: skip
+               + name.encode().ljust(15) + b"\x00" + struct.pack(">H", 0x0400)
+               + name.encode().ljust(15) + b"\x20" + struct.pack(">H", 0x0400))
+    rdata = bytes([3]) + entries + b"\x00" * 6
+    return (struct.pack(">HHHHHH", 1, 0x8400, 0, 1, 0, 0) + names.NBSTAT_NAME
+            + struct.pack(">HHIH", 0x21, 1, 0, len(rdata)) + rdata)
+
+
+def test_packet_parsing():
+    q = names.build_query(0x1234, names.ptr_name("192.168.99.10"), names.TYPE_PTR)
+    assert b"\x0210\x0299\x03168\x03192\x07in-addr\x04arpa\x00" in q
+    assert names.parse_ptr(dns_reply(q, "Kitchen-Speaker.local")) == (0x1234, "Kitchen-Speaker.local")
+    assert names.parse_nbstat(nbstat_reply("GAMING-PC")) == "GAMING-PC"
+    assert names.short_name("tv.localdomain.") == "tv" and names.short_name("10.0.0.1") == ""
+
+
+async def test_ptr_lookup_against_fake_dns(socket_enabled):
+    """Many queries go out on one socket; replies are matched back by transaction id."""
+    table = {names.ptr_name("10.1.1.5"): "nas.lan", names.ptr_name("10.1.1.6"): "printer.lan"}
+
+    class FakeDNS(asyncio.DatagramProtocol):
+        def connection_made(self, t):
+            self.t = t
+
+        def datagram_received(self, data, addr):
+            qname, _ = names.read_name(data, 12)
+            if qname in table:
+                self.t.sendto(dns_reply(data, table[qname]), addr)
+
+    loop = asyncio.get_running_loop()
+    transport, _ = await loop.create_datagram_endpoint(FakeDNS, local_addr=("127.0.0.1", 0))
+    port = transport.get_extra_info("sockname")[1]
+    try:
+        got = await names.ptr_lookup(["10.1.1.5", "10.1.1.6", "10.1.1.7"], ("127.0.0.1", port), wait=0.3)
+    finally:
+        transport.close()
+    assert got == {"10.1.1.5": "nas", "10.1.1.6": "printer"}
+
+
+async def test_name_sources_priority(hass, monkeypatch):
+    devices = {"aa:00:00:00:00:01": "10.0.0.1", "aa:00:00:00:00:02": "10.0.0.2",
+               "aa:00:00:00:00:03": "10.0.0.3", "aa:00:00:00:00:04": "10.0.0.4"}
+    monkeypatch.setattr(names, "dhcp_names", lambda hass: {"aa:00:00:00:00:01": "from-dhcp"})
+
+    async def sysdns(ips):
+        return {"10.0.0.1": "should-not-win", "10.0.0.2": "from-dns"}
+
+    async def zc(hass):
+        return {"10.0.0.3": "esp-kitchen"}
+
+    async def nb(ips):
+        return {"10.0.0.4": "GAMING-PC"}
+
+    async def nothing(ips, server, wait=2.0):
+        return {}
+
+    monkeypatch.setattr(names, "system_reverse_dns", sysdns)
+    monkeypatch.setattr(names, "zeroconf_names", zc)
+    monkeypatch.setattr(names, "netbios_lookup", nb)
+    monkeypatch.setattr(names, "ptr_lookup", nothing)
+    monkeypatch.setattr(names, "default_gateways", lambda: ["10.0.0.254"])
+    assert await names.async_find_names(hass, devices) == {
+        "aa:00:00:00:00:01": ("from-dhcp", "DHCP"), "aa:00:00:00:00:02": ("from-dns", "DNS"),
+        "aa:00:00:00:00:03": ("esp-kitchen", "mDNS"), "aa:00:00:00:00:04": ("GAMING-PC", "NetBIOS")}
+
+
+def test_default_gateway(tmp_path):
+    f = tmp_path / "route"
+    f.write_text("Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+                 "eth0\t00000000\t016310AC\t0003\t0\t0\t0\t00000000\n"
+                 "eth0\t006310AC\t00000000\t0001\t0\t0\t0\t00FFFFFF\n")
+    assert names.default_gateways(str(f)) == ["172.16.99.1"]

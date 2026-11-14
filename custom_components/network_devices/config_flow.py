@@ -33,7 +33,7 @@ async def async_validate(hass: HomeAssistant, subnets: str) -> tuple[str | None,
         return "not_local", {"remote": ", ".join(remote), "local": ", ".join(map(str, local))}
     await async_load_vendor_db()
     try:
-        found = await NetworkScanner(hass, "validate", subnets).async_scan()
+        found = await NetworkScanner(hass, "validate", subnets).async_scan(resolve_names=False)
     except ScanError as err:
         return "scan_failed", {"detail": str(err)}
     if not found:

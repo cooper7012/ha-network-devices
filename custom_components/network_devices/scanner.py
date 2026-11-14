@@ -14,8 +14,9 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, HOSTNAME_REFRESH, MAX_ADDRESSES
+from .const import DOMAIN, HOSTNAME_REFRESH, HOSTNAME_RETRY, MAX_ADDRESSES
 from .models import vendor_for
+from .names import async_find_names, dhcp_names
 
 ARP_PATH = "/proc/net/arp"
 
@@ -79,18 +80,6 @@ def read_arp(path: str = ARP_PATH) -> dict[str, str]:
     return found
 
 
-async def resolve_hostname(ip: str) -> str:
-    """Reverse DNS. Most routers (including UniFi) answer with the device's DHCP hostname."""
-    loop = asyncio.get_running_loop()
-    try:
-        host, _ = await asyncio.wait_for(loop.getnameinfo((ip, 0), socket.NI_NAMEREQD), 3)
-    except (OSError, TimeoutError):
-        return ""
-    if host.replace(".", "").isdigit():
-        return ""
-    return host.split(".")[0]
-
-
 class NetworkScanner:
     """Keeps a list of every device seen, persisted across restarts."""
 
@@ -101,7 +90,7 @@ class NetworkScanner:
         self._devices: dict[str, dict[str, Any]] = {}
         self._loaded = False
 
-    async def async_scan(self) -> list[dict[str, Any]]:
+    async def async_scan(self, resolve_names: bool = True) -> list[dict[str, Any]]:
         if not self._loaded:
             self._devices = (await self._store.async_load() or {}).get("devices", {})
             self._loaded = True
@@ -114,25 +103,22 @@ class NetworkScanner:
             mac: ip for mac, ip in arp.items() if any(ipaddress.IPv4Address(ip) in n for n in self.nets)
         }
 
-        sem = asyncio.Semaphore(32)
-
-        async def update(mac: str, ip: str) -> None:
+        for mac, ip in online.items():
             dev = self._devices.setdefault(mac, {"first_seen": now})
-            stale = now - dev.get("resolved", 0) > HOSTNAME_REFRESH
-            if dev.get("ip") != ip or stale:
-                async with sem:
-                    dev["hostname"] = await resolve_hostname(ip) or dev.get("hostname", "")
-                dev["resolved"] = now
-            dev["ip"] = ip
+            if dev.get("ip") != ip:
+                dev["ip"] = ip
+                dev["resolved"] = 0  # new address: look the name up again
             dev["last_seen"] = now
 
-        await asyncio.gather(*(update(mac, ip) for mac, ip in online.items()))
+        if resolve_names:
+            await self._async_update_names(online, now)
         self._store.async_delay_save(lambda: {"devices": self._devices}, 10)
 
         rows = [
             {
                 "mac": mac,
                 "hostname": d.get("hostname", ""),
+                "hostname_source": d.get("hostname_source", ""),
                 "vendor": vendor_for(mac),
                 "ip": d.get("ip", ""),
                 "online": mac in online,
@@ -143,6 +129,27 @@ class NetworkScanner:
         ]
         rows.sort(key=lambda r: tuple(int(x) for x in r["ip"].split(".")) if r["ip"] else (999,))
         return rows
+
+    async def _async_update_names(self, online: dict[str, str], now: float) -> None:
+        # Names HA's DHCP watcher heard are free to check every scan.
+        for mac, name in dhcp_names(self.hass).items():
+            if mac in self._devices and self._devices[mac].get("hostname") != name:
+                self._devices[mac].update(hostname=name, hostname_source="DHCP", resolved=now)
+
+        due = {
+            mac: ip
+            for mac, ip in online.items()
+            if now - self._devices[mac].get("resolved", 0)
+            > (HOSTNAME_REFRESH if self._devices[mac].get("hostname") else HOSTNAME_RETRY)
+        }
+        if not due:
+            return
+        found = await async_find_names(self.hass, due)
+        for mac in due:
+            dev = self._devices[mac]
+            dev["resolved"] = now
+            if mac in found:
+                dev["hostname"], dev["hostname_source"] = found[mac]
 
     async def async_remove_store(self) -> None:
         await self._store.async_remove()

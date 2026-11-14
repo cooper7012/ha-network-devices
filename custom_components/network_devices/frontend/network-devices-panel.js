@@ -195,7 +195,9 @@ class NetworkDevicesPanel extends HTMLElement {
   }
 
   _row(d) {
-    const host = d.hostname ? esc(d.hostname) : `<span class="none">Unknown</span>`;
+    const host = d.hostname
+      ? `<span title="Name found via ${esc(d.hostname_source || "lookup")}">${esc(d.hostname)}</span>`
+      : `<span class="none" title="The device didn't answer any name lookup (DHCP, DNS, mDNS or NetBIOS)">Unknown</span>`;
     const ip = d.ip
       ? `<a class="ip mono" href="http://${esc(d.ip)}" target="_blank" rel="noopener noreferrer">${esc(d.ip)}</a>`
       : "";

@@ -14,7 +14,10 @@ It works with **any router**: no router login, API key or controller needed.
 ## How it works
 Every minute, Home Assistant sends a tiny packet to each address on your network, then reads which devices
 answered from its own ARP table:
-- **Hostname** comes from reverse DNS. Most routers, including UniFi, answer with the name the device gave when it joined.
+- **Hostname** is found without needing your router's help, trying in order: the name the device sent when it
+  joined the network (Home Assistant's DHCP watcher), reverse DNS (Home Assistant's resolver and your gateway),
+  mDNS (Apple devices, printers, ESPHome/Shelly and most smart-home gear), and NetBIOS (Windows PCs, NAS boxes).
+  Hover over a name to see where it came from. Devices that answer none of these show *Unknown*.
 - **Vendor** comes from the MAC address, using the vendor database that ships with Home Assistant.
   Phones and tablets that use a private (randomized) MAC address are labelled *Private (random MAC)*.
 
