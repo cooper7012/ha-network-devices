@@ -14,7 +14,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, HOSTNAME_REFRESH, HOSTNAME_RETRY, MAX_ADDRESSES
+from .const import DOMAIN, HOSTNAME_REFRESH, HOSTNAME_RETRY, MAX_ADDRESSES, RECENT_DEVICE_SECONDS
 from .models import vendor_for
 from .names import async_find_names, dhcp_names
 
@@ -53,16 +53,23 @@ async def async_local_networks(hass: HomeAssistant) -> list[ipaddress.IPv4Networ
     return nets
 
 
-def probe(nets: list[ipaddress.IPv4Network]) -> None:
-    """Send an empty UDP packet to every address so the kernel ARPs for each one."""
+def probe(targets: list[str]) -> None:
+    """Send an empty UDP packet (discard port) to each address so the kernel ARPs for it.
+
+    For an address the kernel already knows, the ARP check is a direct (unicast) message
+    to that device; only unknown addresses cause ARP broadcasts.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setblocking(False)
-        for net in nets:
-            for ip in net.hosts():
-                try:
-                    sock.sendto(b"", (str(ip), 9))
-                except OSError:
-                    pass
+        for ip in targets:
+            try:
+                sock.sendto(b"", (ip, 9))
+            except OSError:
+                pass
+
+
+def all_hosts(nets: list[ipaddress.IPv4Network]) -> list[str]:
+    return [str(ip) for net in nets for ip in net.hosts()]
 
 
 def read_arp(path: str = ARP_PATH) -> dict[str, str]:
@@ -89,13 +96,34 @@ class NetworkScanner:
         self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.{entry_id}")
         self._devices: dict[str, dict[str, Any]] = {}
         self._loaded = False
+        self.last_full_sweep = 0.0
+        self.last_probe_count = 0
 
-    async def async_scan(self, resolve_names: bool = True) -> list[dict[str, Any]]:
+    async def _async_load(self) -> None:
         if not self._loaded:
             self._devices = (await self._store.async_load() or {}).get("devices", {})
             self._loaded = True
 
-        await self.hass.async_add_executor_job(probe, self.nets)
+    async def async_known_rows(self) -> list[dict[str, Any]]:
+        """Saved devices without scanning (all shown as offline until a scan runs)."""
+        await self._async_load()
+        return self._rows({}, time.time())
+
+    async def async_scan(self, resolve_names: bool = True, full: bool = True) -> list[dict[str, Any]]:
+        """full=True probes every address (finds new devices); False only known recent devices."""
+        await self._async_load()
+        start = time.time()
+        if full:
+            targets = all_hosts(self.nets)
+            self.last_full_sweep = start
+        else:
+            targets = sorted({
+                d["ip"] for d in self._devices.values()
+                if d.get("ip") and start - d.get("last_seen", 0) < RECENT_DEVICE_SECONDS
+                and any(ipaddress.IPv4Address(d["ip"]) in n for n in self.nets)
+            })
+        self.last_probe_count = len(targets)
+        await self.hass.async_add_executor_job(probe, targets)
         await asyncio.sleep(2)  # give devices time to answer ARP
         arp = await self.hass.async_add_executor_job(read_arp)
         now = time.time()
@@ -113,7 +141,9 @@ class NetworkScanner:
         if resolve_names:
             await self._async_update_names(online, now)
         self._store.async_delay_save(lambda: {"devices": self._devices}, 10)
+        return self._rows(online, now)
 
+    def _rows(self, online: dict[str, str], now: float) -> list[dict[str, Any]]:
         rows = [
             {
                 "mac": mac,

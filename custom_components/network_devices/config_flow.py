@@ -9,7 +9,17 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_SCAN_INTERVAL, CONF_SUBNETS, DEFAULT_SCAN_INTERVAL, DOMAIN
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+
+from .const import CONF_SCAN_INTERVAL, CONF_SCAN_MODE, CONF_SUBNETS, DOMAIN, SCAN_MODES
+from .coordinator import settings_from_options
 from .models import async_load_vendor_db
 from .scanner import NetworkScanner, ScanError, async_local_networks, parse_subnets
 
@@ -73,24 +83,38 @@ class NetworkDevicesOptionsFlow(OptionsFlow):
         placeholders = {"remote": "", "local": "", "detail": ""}
         entry = self.config_entry
         if user_input is not None:
-            error, extra = await async_validate(self.hass, user_input[CONF_SUBNETS])
+            if user_input[CONF_SUBNETS] == entry.data[CONF_SUBNETS]:
+                error, extra = None, {}  # unchanged: no need to test-scan
+            else:
+                error, extra = await async_validate(self.hass, user_input[CONF_SUBNETS])
             if error is None:
                 self.hass.config_entries.async_update_entry(
                     entry, data={**entry.data, CONF_SUBNETS: user_input[CONF_SUBNETS]}
                 )
-                return self.async_create_entry(data={CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL]})
+                return self.async_create_entry(
+                    data={
+                        CONF_SCAN_MODE: user_input[CONF_SCAN_MODE],
+                        CONF_SCAN_INTERVAL: int(user_input["scan_minutes"]) * 60,
+                    }
+                )
             errors["base"] = error
             placeholders.update(extra)
         cur = user_input or {}
+        mode, interval = settings_from_options(entry.options)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_SUBNETS, default=cur.get(CONF_SUBNETS, entry.data[CONF_SUBNETS])): str,
-                    vol.Required(
-                        CONF_SCAN_INTERVAL,
-                        default=cur.get(CONF_SCAN_INTERVAL, entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
-                    ): vol.All(int, vol.Range(min=30, max=3600)),
+                    vol.Required(CONF_SCAN_MODE, default=cur.get(CONF_SCAN_MODE, mode)): SelectSelector(
+                        SelectSelectorConfig(
+                            options=SCAN_MODES, translation_key="scan_mode", mode=SelectSelectorMode.LIST
+                        )
+                    ),
+                    vol.Required("scan_minutes", default=cur.get("scan_minutes", interval // 60)): NumberSelector(
+                        NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min",
+                                             mode=NumberSelectorMode.SLIDER)
+                    ),
                 }
             ),
             errors=errors,

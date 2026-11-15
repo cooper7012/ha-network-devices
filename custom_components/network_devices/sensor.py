@@ -35,10 +35,20 @@ class OnlineDevicesSensor(CoordinatorEntity[NetworkDevicesCoordinator], SensorEn
         }
 
     @property
+    def available(self) -> bool:
+        # In "only while panel is open" mode the count isn't kept up to date.
+        return super().available and not self.coordinator.paused
+
+    @property
     def native_value(self) -> int:
         return sum(d["online"] for d in self.coordinator.data or [])
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or []
-        return {"known_devices": len(data), "subnets": self.coordinator.config_entry.data.get("subnets")}
+        return {
+            "known_devices": len(data),
+            "subnets": self.coordinator.config_entry.data.get("subnets"),
+            "scan_mode": self.coordinator.mode,
+            "scan_interval_minutes": self.coordinator.interval // 60,
+        }

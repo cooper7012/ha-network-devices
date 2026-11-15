@@ -17,8 +17,16 @@ It works with **any router**: no router login, API key or controller needed.
 - Adds an `Online devices` sensor you can use in dashboards and automations.
 
 ## How it works
-Every minute, Home Assistant sends a tiny packet to each address on your network, then reads which devices
-answered from its own ARP table:
+Home Assistant sends tiny packets to addresses on your network, then reads which devices answered from its own
+ARP table. Choose how it scans with the ⚙ button on the Network Devices page (administrators only):
+
+| Mode | What it sends | Online devices sensor |
+|---|---|---|
+| **Light scan** (default) | Each interval, one packet straight to each known device, with no broadcasts. Every 15 minutes, a sweep of the whole subnet to find new devices. | Kept up to date |
+| **Only while this page is open** | Nothing at all unless someone has the page open; scans as soon as it's opened. | Unavailable while nobody is looking |
+
+The scan interval can be set from 1 to 30 minutes on the same screen. Changes apply immediately.
+
 - **Hostname** is found without needing your router's help, trying in order: the name the device sent when it
   joined the network (Home Assistant's DHCP watcher), reverse DNS (Home Assistant's resolver and your gateway),
   mDNS (Apple devices, printers, ESPHome/Shelly and most smart-home gear), and NetBIOS (Windows PCs, NAS boxes).
@@ -47,8 +55,8 @@ Home Assistant in Docker needs `network_mode: host`.
 ## Set up
 *Settings → Devices & Services → Add Integration → Network Devices.* Your network is pre-filled, so just click **Submit**.
 
-*Configure* lets you change the subnets (comma-separated, for example `192.168.1.0/24, 192.168.20.0/24`)
-and the scan interval (default 60 seconds).
+*Configure* lets you change the subnets (comma-separated, for example `192.168.1.0/24, 192.168.20.0/24`),
+the scan mode and the interval. The mode and interval can also be changed from the ⚙ button on the page.
 
 Names, tags and saved filters are stored in Home Assistant (`.storage/network_devices.customizations`),
 so they're included in Home Assistant backups.

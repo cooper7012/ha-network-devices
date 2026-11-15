@@ -26,7 +26,11 @@
         "description": "Home Assistant probes these subnets and lists every device that answers, with its hostname, MAC address, vendor and IP address. Only networks Home Assistant is connected to can be scanned (devices on other VLANs are not visible). Your networks are pre-filled.",
         "data": {
           "subnets": "Subnets to scan",
-          "scan_interval": "Scan interval (seconds)"
+          "scan_mode": "Scan mode",
+          "scan_minutes": "Scan interval"
+        },
+        "data_description": {
+          "scan_mode": "Light scan keeps the device list and sensor up to date with very little traffic. 'Only while panel is open' sends nothing when nobody is looking, but the sensor isn't updated."
         }
       }
     },
@@ -41,6 +45,14 @@
     "sensor": {
       "online_devices": {
         "name": "Online devices"
+      }
+    }
+  },
+  "selector": {
+    "scan_mode": {
+      "options": {
+        "light": "Light scan (recommended)",
+        "panel": "Only while the panel is open"
       }
     }
   }

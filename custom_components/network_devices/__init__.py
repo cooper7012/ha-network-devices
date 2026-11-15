@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,12 @@ from homeassistant.helpers.typing import ConfigType
 
 from .config_flow import async_default_subnets
 from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_SCAN_MODE,
     CONF_SUBNETS,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+    SCAN_MODES,
     DATA_PANEL_REGISTERED,
     DATA_STATIC_REGISTERED,
     DOMAIN,
@@ -28,7 +34,7 @@ from .const import (
     STATIC_URL,
     VERSION,
 )
-from .coordinator import NetworkDevicesCoordinator
+from .coordinator import NetworkDevicesCoordinator, settings_from_options
 from .customizations import FILTER_SCHEMA, NAME, TAG, TAGS, async_get_customizations
 from .models import async_load_vendor_db
 from .scanner import NetworkScanner
@@ -42,7 +48,7 @@ type NetworkDevicesConfigEntry = ConfigEntry[NetworkDevicesCoordinator]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await async_get_customizations(hass)
-    for command in (ws_list_devices, ws_update_device, ws_rename_tag, ws_delete_tag,
+    for command in (ws_list_devices, ws_set_scan_settings, ws_update_device, ws_rename_tag, ws_delete_tag,
                     ws_save_filter, ws_delete_filter, ws_set_last_filter):
         websocket_api.async_register_command(hass, command)
     return True
@@ -62,17 +68,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: NetworkDevicesConfigEntry) -> bool:
     await async_load_vendor_db()
     coordinator = NetworkDevicesCoordinator(hass, entry, NetworkScanner(hass, entry.entry_id, entry.data[CONF_SUBNETS]))
+    coordinator.subnets = entry.data[CONF_SUBNETS]
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 
     await _async_register_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_reload))
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     return True
 
 
-async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
+async def _async_entry_updated(hass: HomeAssistant, entry: NetworkDevicesConfigEntry) -> None:
+    """New subnets need a reload; scan mode and interval apply on the fly."""
+    coordinator = entry.runtime_data
+    if entry.data.get(CONF_SUBNETS) != coordinator.subnets:
+        await hass.config_entries.async_reload(entry.entry_id)
+    else:
+        coordinator.apply_settings(*settings_from_options(entry.options))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: NetworkDevicesConfigEntry) -> bool:
@@ -124,12 +136,18 @@ async def ws_list_devices(
     custom = await async_get_customizations(hass)
     devices: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
+    scan: dict[str, Any] | None = None
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.state is not ConfigEntryState.LOADED:
             continue
         coordinator: NetworkDevicesCoordinator = entry.runtime_data
         if msg["refresh"]:
+            coordinator.panel_seen = time.time()
             await coordinator.async_refresh()
+            starting = False
+        else:
+            starting = coordinator.panel_heartbeat()  # the panel is open
+        scan = scan or {**coordinator.status(), "starting": starting}
         for row in coordinator.data or []:
             extra = custom.device(row["mac"])
             devices.setdefault(row["mac"], {**row, "name": extra.get("name", ""), "tags": extra.get("tags", [])})
@@ -143,8 +161,31 @@ async def ws_list_devices(
             "tags": custom.all_tags(),
             "filters": [{"filter_id": fid, **f} for fid, f in custom.filters.items()],
             "last_filter": custom.last.get(connection.user.id),
+            "scan": scan,
+            "is_admin": connection.user.is_admin,
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "network_devices/set_scan_settings",
+        vol.Optional("mode"): vol.In(SCAN_MODES),
+        vol.Optional("interval"): vol.All(int, vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_set_scan_settings(hass, connection, msg) -> None:
+    """Change scan mode / interval from the panel. Saved in the entry's options."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        options = {**entry.options}
+        if "mode" in msg:
+            options[CONF_SCAN_MODE] = msg["mode"]
+        if "interval" in msg:
+            options[CONF_SCAN_INTERVAL] = msg["interval"]
+        hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(

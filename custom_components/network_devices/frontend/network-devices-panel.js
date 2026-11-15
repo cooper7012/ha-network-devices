@@ -95,6 +95,9 @@ class NetworkDevicesPanel extends HTMLElement {
       this._errors = res.errors || [];
       this._tags = res.tags || [];
       this._filters = res.filters || [];
+      this._scan = res.scan || null;
+      this._isAdmin = res.is_admin !== false;
+      this._fastPoll(this._scan && (this._scan.starting || (this._scan.mode === "panel" && !this._scan.last_scan)));
       if (!this._restored) {
         this._restored = true;
         if (res.last_filter) {
@@ -233,6 +236,21 @@ class NetworkDevicesPanel extends HTMLElement {
         .tag-editor input { flex:1 1 120px; border:0 !important; background:none !important; padding:4px !important; outline:none; }
         .suggest { display:flex; flex-wrap:wrap; gap:6px; }
         .suggest:empty { display:none; }
+        .modes { display:flex; flex-direction:column; gap:8px; }
+        .mode { display:flex; flex-direction:column; gap:4px; text-align:left; padding:12px; border-radius:12px;
+                border:2px solid var(--divider-color); background:var(--primary-background-color); }
+        .mode:disabled { cursor:default; opacity:.8; }
+        .mode.on { border-color:var(--primary-color); }
+        .mode-title { display:flex; align-items:center; gap:8px; font-weight:500; font-size:15px; }
+        .mode-text { font-size:13px; color:var(--secondary-text-color); line-height:1.4; padding-left:26px; }
+        .radio { width:16px; height:16px; border-radius:50%; border:2px solid var(--secondary-text-color); box-sizing:border-box; flex:none; }
+        .mode.on .radio { border:5px solid var(--primary-color); }
+        .rec { font-size:11px; font-weight:400; padding:1px 8px; border-radius:10px; background:var(--chip); color:var(--secondary-text-color); }
+        input[type=range] { width:100%; accent-color:var(--primary-color); }
+        .range-ends { display:flex; justify-content:space-between; font-size:12px; }
+        .dlg label.field b { color:var(--primary-text-color); }
+        .warn { color:var(--warning-color, #ffa600); }
+        .stats .mode-pill { cursor:pointer; text-decoration:underline dotted; }
         .dlg .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
         @media (max-width:600px) {
           main { padding:8px; } .toolbar { padding:10px; position:relative; } .saved select { max-width:150px; }
@@ -242,6 +260,7 @@ class NetworkDevicesPanel extends HTMLElement {
       <header>
         <span id="menu"></span>
         <h1>Network Devices</h1>
+        <button class="icon-btn" id="settingsBtn" title="Scan settings"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
         <button class="icon-btn" id="refresh" title="Scan now"><ha-icon icon="mdi:refresh"></ha-icon></button>
       </header>
       <main>
@@ -290,6 +309,29 @@ class NetworkDevicesPanel extends HTMLElement {
           <button type="button" class="btn" id="editCancel">Cancel</button>
           <button type="submit" class="btn primary" id="editSave">Save</button>
         </div>
+      </form></dialog>
+
+      <dialog id="setDlg"><form method="dialog" class="dlg" id="setForm">
+        <h2>Scan settings</h2>
+        <div class="modes" id="modes">
+          <button type="button" class="mode" data-mode="light">
+            <span class="mode-title"><span class="radio"></span>Light scan <span class="rec">Recommended</span></span>
+            <span class="mode-text">Keeps the list and the <i>Online devices</i> sensor up to date. Each scan checks the devices it
+              already knows directly, with no broadcasts. It looks for new devices every 15 minutes.</span>
+          </button>
+          <button type="button" class="mode" data-mode="panel">
+            <span class="mode-title"><span class="radio"></span>Only while this page is open</span>
+            <span class="mode-text">Sends nothing to your network when nobody is looking. It scans as soon as you open
+              this page. The <i>Online devices</i> sensor is unavailable in the meantime.</span>
+          </button>
+        </div>
+        <label class="field">Scan every <b id="intervalLabel"></b>
+          <input type="range" id="interval" min="1" max="30" step="1">
+          <span class="range-ends"><span>1 min</span><span>30 min</span></span>
+        </label>
+        <div class="meta" id="scanStatus"></div>
+        <div class="meta warn" id="notAdmin" hidden>Only Home Assistant administrators can change these settings.</div>
+        <div class="actions"><button type="button" class="btn primary" id="setClose">Done</button></div>
       </form></dialog>
 
       <dialog id="askDlg"><form method="dialog" class="dlg" id="askForm">
@@ -381,8 +423,17 @@ class NetworkDevicesPanel extends HTMLElement {
 
     this._setupEditor();
     this._setupAsk();
+    this._setupSettings();
     this._syncControls();
     this._fetch();
+  }
+
+  // Poll every 2 s while a scan the panel triggered is running, so results appear quickly.
+  _fastPoll(on) {
+    clearTimeout(this._fastTimer);
+    if (on && (this._fastCount = (this._fastCount || 0) + 1) <= 15) {
+      this._fastTimer = setTimeout(() => this._fetch(), 2000);
+    } else if (!on) this._fastCount = 0;
   }
 
   _setBusy(busy) {
@@ -476,7 +527,9 @@ class NetworkDevicesPanel extends HTMLElement {
       <span><b>${online}</b> online</span>
       <span><b>${this._devices.length - online}</b> offline</span>
       <span>Showing <b>${rows.length}</b></span>
-      ${this._updated ? `<span>Updated ${this._updated.toLocaleTimeString()}</span>` : ""}`;
+      ${this._scan ? `<span class="mode-pill" title="Scan settings">${this._scan.mode === "panel" ? "Scans while open" : "Light scan"} · every ${Math.round(this._scan.interval / 60)} min</span>` : ""}
+      ${this._scan ? `<span>${esc(this._scanSummary())}</span>` : ""}`;
+    if ($("setDlg").open) $("scanStatus").textContent = this._scanSummary();
 
     const errs = [...(this._error ? [this._error] : []), ...this._errors];
     $("errors").innerHTML = errs.map((e) => `<div class="err">${esc(e)}</div>`).join("");
@@ -586,6 +639,67 @@ class NetworkDevicesPanel extends HTMLElement {
     const suggestions = this._tags.filter((t) => !hasTag(this._editTags, t) && (!typed || fold(t).includes(typed)));
     $("suggest").innerHTML = suggestions.slice(0, 20)
       .map((t) => `<button type="button" class="chip" data-add="${esc(t)}">+ ${esc(t)}</button>`).join("");
+  }
+
+  // ---------------------------------------------------------------- scan settings
+  _setupSettings() {
+    const $ = this.$;
+    $("settingsBtn").addEventListener("click", () => { this._renderSettings(); $("setDlg").showModal(); });
+    $("setClose").addEventListener("click", () => $("setDlg").close());
+    $("stats").addEventListener("click", (e) => {
+      if (e.target.closest(".mode-pill")) { this._renderSettings(); $("setDlg").showModal(); }
+    });
+    $("modes").addEventListener("click", (e) => {
+      const m = e.target.closest("[data-mode]");
+      if (!m || !this._isAdmin || !this._scan || m.dataset.mode === this._scan.mode) return;
+      this._scan.mode = m.dataset.mode;
+      this._renderSettings();
+      this._sendSettings({ mode: m.dataset.mode });
+    });
+    $("interval").addEventListener("input", (e) => { $("intervalLabel").textContent = this._minutes(+e.target.value); });
+    $("interval").addEventListener("change", (e) => {
+      if (!this._scan) return;
+      this._scan.interval = +e.target.value * 60;
+      this._sendSettings({ interval: +e.target.value * 60 });
+    });
+  }
+
+  _minutes(n) { return n === 1 ? "1 minute" : `${n} minutes`; }
+
+  async _sendSettings(change) {
+    try {
+      await this._ws({ type: "network_devices/set_scan_settings", ...change });
+      await this._fetch();
+      this._renderSettings();
+    } catch (err) { /* shown in the error bar */ }
+  }
+
+  _scanSummary() {
+    const sc = this._scan;
+    if (!sc) return "";
+    const when = sc.last_scan ? new Date(sc.last_scan * 1000).toLocaleTimeString() : null;
+    if (sc.starting || (sc.mode === "panel" && !when)) return "Scanning…";
+    if (sc.paused) return "Paused while this page was closed";
+    if (!when) return "";
+    const kind = sc.last_scan_full ? "searched the whole network" : `checked ${sc.devices_probed} known devices`;
+    const next = sc.next_full_sweep_in > 0 ? ` · next search for new devices in ${Math.max(1, Math.round(sc.next_full_sweep_in / 60))} min` : "";
+    return `Last scan ${when} (${kind})${next}`;
+  }
+
+  _renderSettings() {
+    const $ = this.$;
+    const sc = this._scan;
+    if (!sc) return;
+    $("modes").querySelectorAll(".mode").forEach((b) => {
+      b.classList.toggle("on", b.dataset.mode === sc.mode);
+      b.disabled = !this._isAdmin;
+    });
+    const minutes = Math.round(sc.interval / 60);
+    $("interval").value = minutes;
+    $("interval").disabled = !this._isAdmin;
+    $("intervalLabel").textContent = this._minutes(minutes);
+    $("scanStatus").textContent = this._scanSummary();
+    $("notAdmin").hidden = this._isAdmin;
   }
 
   // ---------------------------------------------------------------- small prompt dialog

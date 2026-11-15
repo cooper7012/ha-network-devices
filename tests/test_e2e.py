@@ -125,10 +125,11 @@ async def test_setup_flow(hass, enable_custom_integrations, fake_net, hass_ws_cl
 
     # Options: change interval and subnets
     r = await hass.config_entries.options.async_init(entry.entry_id)
-    r = await hass.config_entries.options.async_configure(r["flow_id"], {"subnets": "192.168.99.0/25", "scan_interval": 120})
+    r = await hass.config_entries.options.async_configure(
+        r["flow_id"], {"subnets": "192.168.99.0/25", "scan_mode": "light", "scan_minutes": 2})
     assert r["type"] == "create_entry"
     await hass.async_block_till_done()
-    assert entry.data["subnets"] == "192.168.99.0/25" and entry.options["scan_interval"] == 120
+    assert entry.data["subnets"] == "192.168.99.0/25" and entry.options == {"scan_mode": "light", "scan_interval": 120}
     assert entry.state is ConfigEntryState.LOADED
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -307,3 +308,85 @@ async def test_names_tags_and_filters(hass, enable_custom_integrations, fake_net
     stored = hass_storage["network_devices.customizations"]["data"]
     assert stored["devices"] == {tv: {"name": "TV"}}
     assert stored["last"]  # last-used filter survives restarts
+
+
+# --- scan modes -------------------------------------------------------------------
+
+@pytest.fixture
+def probes(monkeypatch, fake_net):
+    """Record which addresses each scan sends packets to."""
+    sent = []
+    monkeypatch.setattr(scanner, "probe", lambda targets: sent.append(list(targets)))
+    return sent
+
+
+async def _setup(hass, options=None):
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain="network_devices", version=2, data={"subnets": "192.168.99.0/24"}, options=options or {})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_light_scan_only_probes_known_devices(hass, enable_custom_integrations, probes, monkeypatch):
+    entry = await _setup(hass)
+    coordinator = entry.runtime_data
+    assert len(probes[0]) == 254  # first scan: full sweep to find devices
+    await coordinator.async_refresh()
+    assert probes[1] == ["192.168.99.10", "192.168.99.20"]  # then only known devices
+    # after 15 minutes, another full sweep looks for new devices
+    monkeypatch.setattr(coordinator.scanner, "last_full_sweep", coordinator.scanner.last_full_sweep - 901)
+    await coordinator.async_refresh()
+    assert len(probes[2]) == 254
+    assert coordinator.status()["mode"] == "light" and coordinator.status()["devices_probed"] == 254
+
+
+async def test_panel_mode_sends_nothing_until_panel_opens(hass, enable_custom_integrations, probes, hass_ws_client):
+    entry = await _setup(hass, {"scan_mode": "panel", "scan_interval": 60})
+    coordinator = entry.runtime_data
+    await coordinator.async_refresh()
+    assert probes == []  # nobody looking: no packets at all
+    assert hass.states.get("sensor.network_devices_online_devices").state == "unavailable"
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "network_devices/list"})  # opening the panel
+    res = (await ws.receive_json())["result"]
+    assert res["scan"]["starting"] is True  # opening the panel kicks off a scan
+    await hass.async_block_till_done()
+    assert len(probes) == 1 and len(probes[0]) == 254  # scanned right away
+    await ws.send_json({"id": 2, "type": "network_devices/list"})
+    res = (await ws.receive_json())["result"]
+    assert res["scan"]["paused"] is False and res["scan"]["starting"] is False
+    assert [d["hostname"] for d in res["devices"] if d["online"]] == ["living-room-tv", ""]
+    assert hass.states.get("sensor.network_devices_online_devices").state == "2"
+
+    # panel closed for longer than the heartbeat window: back to silence
+    coordinator.panel_seen -= 60
+    await coordinator.async_refresh()
+    assert len(probes) == 1
+
+
+async def test_change_settings_from_panel(hass, enable_custom_integrations, probes, hass_ws_client,
+                                          hass_read_only_access_token):
+    entry = await _setup(hass)
+    coordinator = entry.runtime_data
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "network_devices/set_scan_settings", "mode": "panel", "interval": 600})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    assert entry.options == {"scan_mode": "panel", "scan_interval": 600}
+    assert entry.runtime_data is coordinator  # applied live, no reload
+    assert coordinator.mode == "panel" and coordinator.interval == 600
+
+    await ws.send_json({"id": 2, "type": "network_devices/set_scan_settings", "interval": 30})  # under 1 minute
+    assert not (await ws.receive_json())["success"]
+    await ws.send_json({"id": 3, "type": "network_devices/set_scan_settings", "interval": 1860})  # over 30 minutes
+    assert not (await ws.receive_json())["success"]
+
+    ro = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": "network_devices/set_scan_settings", "mode": "light"})
+    msg = await ro.receive_json()
+    assert not msg["success"] and msg["error"]["code"] == "unauthorized"
+    await ro.send_json({"id": 2, "type": "network_devices/list"})
+    assert (await ro.receive_json())["result"]["is_admin"] is False

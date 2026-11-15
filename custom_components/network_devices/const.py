@@ -1,12 +1,22 @@
 """Constants for the Network Devices integration."""
 
 DOMAIN = "network_devices"
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 CONF_SUBNETS = "subnets"
-CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SCAN_INTERVAL = "scan_interval"  # seconds
+CONF_SCAN_MODE = "scan_mode"
 
-DEFAULT_SCAN_INTERVAL = 60  # seconds
+MODE_LIGHT = "light"  # check known devices every interval, full sweep every FULL_SWEEP_SECONDS
+MODE_PANEL = "panel"  # only scan while someone has the panel open
+SCAN_MODES = [MODE_LIGHT, MODE_PANEL]
+
+DEFAULT_SCAN_INTERVAL = 60
+MIN_SCAN_INTERVAL = 60  # 1 minute
+MAX_SCAN_INTERVAL = 1800  # 30 minutes
+FULL_SWEEP_SECONDS = 900  # look for new devices every 15 minutes
+RECENT_DEVICE_SECONDS = 86400  # light scans check devices seen in the last 24 hours
+PANEL_ACTIVE_SECONDS = 35  # the panel checks in every 10 s while open
 MAX_ADDRESSES = 4096
 HOSTNAME_REFRESH = 1800  # re-check known hostnames every 30 minutes
 HOSTNAME_RETRY = 600  # retry devices without a name every 10 minutes
