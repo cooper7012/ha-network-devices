@@ -1,3 +1,5 @@
+<img src="custom_components/network_devices/brand/icon@2x.png" alt="Network Devices logo" width="128" align="right">
+
 # Network Devices for Home Assistant
 
 Adds a **Network Devices** page to the Home Assistant sidebar listing every device on your network.
