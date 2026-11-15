@@ -322,16 +322,14 @@ class NetworkDevicesPanel extends HTMLElement {
         <div class="modes" id="modes">
           <button type="button" class="mode" data-mode="light">
             <span class="mode-title"><span class="radio"></span>Light scan <span class="rec">Recommended</span></span>
-            <span class="mode-text">Keeps the list and the <i>Online devices</i> sensor up to date. Each scan checks the devices it
-              already knows directly, with no broadcasts. It looks for new devices every 15 minutes.</span>
+            <span class="mode-text" id="lightText"></span>
           </button>
           <button type="button" class="mode" data-mode="panel">
             <span class="mode-title"><span class="radio"></span>Only while this page is open</span>
-            <span class="mode-text">Sends nothing to your network when nobody is looking. It scans as soon as you open
-              this page. The <i>Online devices</i> sensor is unavailable in the meantime.</span>
+            <span class="mode-text" id="panelText"></span>
           </button>
         </div>
-        <label class="field">Scan every <b id="intervalLabel"></b>
+        <label class="field">Check devices every <b id="intervalLabel"></b>
           <input type="range" id="interval" min="1" max="30" step="1">
           <span class="range-ends"><span>1 min</span><span>30 min</span></span>
         </label>
@@ -662,7 +660,7 @@ class NetworkDevicesPanel extends HTMLElement {
       this._renderSettings();
       this._sendSettings({ mode: m.dataset.mode });
     });
-    $("interval").addEventListener("input", (e) => { $("intervalLabel").textContent = this._minutes(+e.target.value); });
+    $("interval").addEventListener("input", (e) => this._describeModes(+e.target.value));
     $("interval").addEventListener("change", (e) => {
       if (!this._scan) return;
       this._scan.interval = +e.target.value * 60;
@@ -671,6 +669,23 @@ class NetworkDevicesPanel extends HTMLElement {
   }
 
   _minutes(n) { return n === 1 ? "1 minute" : `${n} minutes`; }
+
+  // Mode descriptions follow the slider, so the numbers always match what will happen.
+  // A full search for new devices runs on the first scan at least 15 minutes after the last one.
+  _describeModes(n) {
+    const $ = this.$;
+    const every = n === 1 ? "every minute" : `every ${n} minutes`;
+    const fullEvery = n >= 15 ? n : Math.ceil(15 / n) * n;
+    $("intervalLabel").textContent = this._minutes(n);
+    $("lightText").innerHTML = n >= 15
+      ? `Searches your whole network ${every}, finding new devices too. Keeps the list and the
+         <i>Online devices</i> sensor up to date.`
+      : `Checks the devices it already knows ${every}, messaging each one directly with no broadcasts.
+         It searches the whole network for new devices every ${fullEvery} minutes. Keeps the list and the
+         <i>Online devices</i> sensor up to date.`;
+    $("panelText").innerHTML = `Sends nothing to your network while nobody has this page open. While it's open,
+      it scans right away and then ${every}. The <i>Online devices</i> sensor is unavailable otherwise.`;
+  }
 
   async _sendSettings(change) {
     try {
@@ -703,7 +718,7 @@ class NetworkDevicesPanel extends HTMLElement {
     const minutes = Math.round(sc.interval / 60);
     $("interval").value = minutes;
     $("interval").disabled = !this._isAdmin;
-    $("intervalLabel").textContent = this._minutes(minutes);
+    this._describeModes(minutes);
     $("scanStatus").textContent = this._scanSummary();
     $("notAdmin").hidden = this._isAdmin;
   }
