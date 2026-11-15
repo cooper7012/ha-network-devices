@@ -22,10 +22,13 @@ ARP table. Choose how it scans with the ⚙ button on the Network Devices page (
 
 | Mode | What it sends | Online devices sensor |
 |---|---|---|
-| **Light scan** (default) | Each interval, one packet straight to each known device, with no broadcasts. Every 15 minutes, a sweep of the whole subnet to find new devices. | Kept up to date |
+| **Light scan** (default) | Each check, one packet straight to each known device, with no broadcasts. Every so often, a sweep of the whole subnet to find new devices. | Kept up to date |
 | **Only while this page is open** | Nothing at all unless someone has the page open; scans as soon as it's opened. | Unavailable while nobody is looking |
 
-The scan interval can be set from 1 to 30 minutes on the same screen. Changes apply immediately.
+Two sliders on the same screen control the timing, and changes apply immediately:
+- **Check known devices every** 1–30 minutes (default 1).
+- **Search for new devices every** 1–60 minutes (default 15). The full search runs with the first check after
+  that time. At or below the check interval, every scan is a full search.
 
 - **Hostname** is found without needing your router's help, trying in order: the name the device sent when it
   joined the network (Home Assistant's DHCP watcher), reverse DNS (Home Assistant's resolver and your gateway),
@@ -56,7 +59,7 @@ Home Assistant in Docker needs `network_mode: host`.
 *Settings → Devices & Services → Add Integration → Network Devices.* Your network is pre-filled, so just click **Submit**.
 
 *Configure* lets you change the subnets (comma-separated, for example `192.168.1.0/24, 192.168.20.0/24`),
-the scan mode and the interval. The mode and interval can also be changed from the ⚙ button on the page.
+the scan mode and both intervals. They can also be changed from the ⚙ button on the page.
 
 Names, tags and saved filters are stored in Home Assistant (`.storage/network_devices.customizations`),
 so they're included in Home Assistant backups.

@@ -27,10 +27,13 @@
         "data": {
           "subnets": "Subnets to scan",
           "scan_mode": "Scan mode",
-          "scan_minutes": "Scan interval"
+          "scan_minutes": "Check known devices every",
+          "full_sweep_minutes": "Search for new devices every"
         },
         "data_description": {
-          "scan_mode": "Light scan keeps the device list and sensor up to date with very little traffic. 'Only while panel is open' sends nothing when nobody is looking, but the sensor isn't updated."
+          "scan_mode": "Light scan keeps the device list and sensor up to date with very little traffic. 'Only while panel is open' sends nothing when nobody is looking, but the sensor isn't updated.",
+          "scan_minutes": "How often devices it already knows are checked (a direct message to each, no broadcasts).",
+          "full_sweep_minutes": "How often every address in the subnet is probed to find new devices. At or below the check interval, every scan is a full search."
         }
       }
     },

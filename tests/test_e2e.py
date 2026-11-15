@@ -126,10 +126,10 @@ async def test_setup_flow(hass, enable_custom_integrations, fake_net, hass_ws_cl
     # Options: change interval and subnets
     r = await hass.config_entries.options.async_init(entry.entry_id)
     r = await hass.config_entries.options.async_configure(
-        r["flow_id"], {"subnets": "192.168.99.0/25", "scan_mode": "light", "scan_minutes": 2})
+        r["flow_id"], {"subnets": "192.168.99.0/25", "scan_mode": "light", "scan_minutes": 2, "full_sweep_minutes": 20})
     assert r["type"] == "create_entry"
     await hass.async_block_till_done()
-    assert entry.data["subnets"] == "192.168.99.0/25" and entry.options == {"scan_mode": "light", "scan_interval": 120}
+    assert entry.data["subnets"] == "192.168.99.0/25" and entry.options == {"scan_mode": "light", "scan_interval": 120, "full_sweep_interval": 1200}
     assert entry.state is ConfigEntryState.LOADED
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -372,12 +372,17 @@ async def test_change_settings_from_panel(hass, enable_custom_integrations, prob
     entry = await _setup(hass)
     coordinator = entry.runtime_data
     ws = await hass_ws_client(hass)
-    await ws.send_json({"id": 1, "type": "network_devices/set_scan_settings", "mode": "panel", "interval": 600})
+    await ws.send_json({"id": 1, "type": "network_devices/set_scan_settings", "mode": "panel", "interval": 600,
+                        "full_sweep": 1800})
     assert (await ws.receive_json())["success"]
     await hass.async_block_till_done()
-    assert entry.options == {"scan_mode": "panel", "scan_interval": 600}
+    assert entry.options == {"scan_mode": "panel", "scan_interval": 600, "full_sweep_interval": 1800}
     assert entry.runtime_data is coordinator  # applied live, no reload
-    assert coordinator.mode == "panel" and coordinator.interval == 600
+    assert coordinator.mode == "panel" and coordinator.interval == 600 and coordinator.full_sweep == 1800
+    assert coordinator.status()["full_sweep"] == 1800
+    for bad in (30, 3660):  # under 1 minute / over 60 minutes
+        await ws.send_json({"id": 10 + bad, "type": "network_devices/set_scan_settings", "full_sweep": bad})
+        assert not (await ws.receive_json())["success"]
 
     await ws.send_json({"id": 2, "type": "network_devices/set_scan_settings", "interval": 30})  # under 1 minute
     assert not (await ws.receive_json())["success"]
@@ -390,3 +395,29 @@ async def test_change_settings_from_panel(hass, enable_custom_integrations, prob
     assert not msg["success"] and msg["error"]["code"] == "unauthorized"
     await ro.send_json({"id": 2, "type": "network_devices/list"})
     assert (await ro.receive_json())["result"]["is_admin"] is False
+
+
+async def test_full_sweep_interval_setting(hass, enable_custom_integrations, probes, monkeypatch):
+    # 1-minute checks, 5-minute full search
+    entry = await _setup(hass, {"scan_interval": 60, "full_sweep_interval": 300})
+    coordinator = entry.runtime_data
+    assert len(probes[0]) == 254
+    clock = [coordinator.scanner.last_full_sweep]
+    monkeypatch.setattr(scanner.time, "time", lambda: clock[0])
+    import custom_components.network_devices.coordinator as coord_mod
+    monkeypatch.setattr(coord_mod.time, "time", lambda: clock[0])
+    sizes = []
+    for _ in range(10):  # ten scans, one minute apart (a little late, like real timers)
+        clock[0] += 61
+        await coordinator.async_refresh()
+        sizes.append(len(probes[-1]))
+    assert sizes == [2, 2, 2, 2, 254, 2, 2, 2, 2, 254]  # full search on every 5th scan
+
+    # At or below the check interval: every scan is a full search
+    coordinator.apply_settings("light", 120, 60)
+    await hass.async_block_till_done()
+    probes.clear()
+    for _ in range(3):
+        clock[0] += 121
+        await coordinator.async_refresh()
+    assert [len(p) for p in probes][-3:] == [254, 254, 254]

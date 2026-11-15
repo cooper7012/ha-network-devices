@@ -18,10 +18,13 @@ from homeassistant.helpers.typing import ConfigType
 
 from .config_flow import async_default_subnets
 from .const import (
+    CONF_FULL_SWEEP,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_MODE,
     CONF_SUBNETS,
+    MAX_FULL_SWEEP,
     MAX_SCAN_INTERVAL,
+    MIN_FULL_SWEEP,
     MIN_SCAN_INTERVAL,
     SCAN_MODES,
     DATA_PANEL_REGISTERED,
@@ -172,6 +175,7 @@ async def ws_list_devices(
         vol.Required("type"): "network_devices/set_scan_settings",
         vol.Optional("mode"): vol.In(SCAN_MODES),
         vol.Optional("interval"): vol.All(int, vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL)),
+        vol.Optional("full_sweep"): vol.All(int, vol.Range(min=MIN_FULL_SWEEP, max=MAX_FULL_SWEEP)),
     }
 )
 @websocket_api.require_admin
@@ -184,6 +188,8 @@ async def ws_set_scan_settings(hass, connection, msg) -> None:
             options[CONF_SCAN_MODE] = msg["mode"]
         if "interval" in msg:
             options[CONF_SCAN_INTERVAL] = msg["interval"]
+        if "full_sweep" in msg:
+            options[CONF_FULL_SWEEP] = msg["full_sweep"]
         hass.config_entries.async_update_entry(entry, options=options)
     connection.send_result(msg["id"])
 

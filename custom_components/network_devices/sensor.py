@@ -51,4 +51,5 @@ class OnlineDevicesSensor(CoordinatorEntity[NetworkDevicesCoordinator], SensorEn
             "subnets": self.coordinator.config_entry.data.get("subnets"),
             "scan_mode": self.coordinator.mode,
             "scan_interval_minutes": self.coordinator.interval // 60,
+            "full_sweep_minutes": self.coordinator.full_sweep // 60,
         }

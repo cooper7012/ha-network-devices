@@ -254,6 +254,8 @@ class NetworkDevicesPanel extends HTMLElement {
         .rec { font-size:11px; font-weight:400; padding:1px 8px; border-radius:10px; background:var(--chip); color:var(--secondary-text-color); }
         input[type=range] { width:100%; accent-color:var(--primary-color); }
         .range-ends { display:flex; justify-content:space-between; font-size:12px; }
+        .hint-line { font-size:12px; color:var(--secondary-text-color); }
+        .hint-line:empty { display:none; }
         .dlg label.field b { color:var(--primary-text-color); }
         .warn { color:var(--warning-color, #ffa600); }
         .stats .mode-pill { cursor:pointer; text-decoration:underline dotted; }
@@ -329,9 +331,14 @@ class NetworkDevicesPanel extends HTMLElement {
             <span class="mode-text" id="panelText"></span>
           </button>
         </div>
-        <label class="field">Check devices every <b id="intervalLabel"></b>
+        <label class="field">Check known devices every <b id="intervalLabel"></b>
           <input type="range" id="interval" min="1" max="30" step="1">
           <span class="range-ends"><span>1 min</span><span>30 min</span></span>
+        </label>
+        <label class="field">Search for new devices every <b id="fullLabel"></b>
+          <input type="range" id="fullSweep" min="1" max="60" step="1">
+          <span class="range-ends"><span>1 min</span><span>60 min</span></span>
+          <span class="hint-line" id="fullHint"></span>
         </label>
         <div class="meta" id="scanStatus"></div>
         <div class="meta warn" id="notAdmin" hidden>Only Home Assistant administrators can change these settings.</div>
@@ -531,7 +538,7 @@ class NetworkDevicesPanel extends HTMLElement {
       <span><b>${online}</b> online</span>
       <span><b>${this._devices.length - online}</b> offline</span>
       <span>Showing <b>${rows.length}</b></span>
-      ${this._scan ? `<span class="mode-pill" title="Scan settings">${this._scan.mode === "panel" ? "Scans while open" : "Light scan"} · every ${Math.round(this._scan.interval / 60)} min</span>` : ""}
+      ${this._scan ? `<span class="mode-pill" title="Scan settings">${this._scan.mode === "panel" ? "Scans while open" : "Light scan"} · check every ${Math.round(this._scan.interval / 60)} min · new devices every ${this._effectiveFull(Math.round(this._scan.interval / 60), Math.round((this._scan.full_sweep || 900) / 60))} min</span>` : ""}
       ${this._scan ? `<span>${esc(this._scanSummary())}</span>` : ""}`;
     if ($("setDlg").open) $("scanStatus").textContent = this._scanSummary();
 
@@ -660,31 +667,44 @@ class NetworkDevicesPanel extends HTMLElement {
       this._renderSettings();
       this._sendSettings({ mode: m.dataset.mode });
     });
-    $("interval").addEventListener("input", (e) => this._describeModes(+e.target.value));
-    $("interval").addEventListener("change", (e) => {
-      if (!this._scan) return;
-      this._scan.interval = +e.target.value * 60;
-      this._sendSettings({ interval: +e.target.value * 60 });
-    });
+    for (const [id, key] of [["interval", "interval"], ["fullSweep", "full_sweep"]]) {
+      $(id).addEventListener("input", () => this._describeModes());
+      $(id).addEventListener("change", (e) => {
+        if (!this._scan) return;
+        this._scan[key] = +e.target.value * 60;
+        this._sendSettings({ [key]: +e.target.value * 60 });
+      });
+    }
   }
 
   _minutes(n) { return n === 1 ? "1 minute" : `${n} minutes`; }
 
-  // Mode descriptions follow the slider, so the numbers always match what will happen.
-  // A full search for new devices runs on the first scan at least 15 minutes after the last one.
-  _describeModes(n) {
+  // When a full search actually happens: on the first check at least `full` minutes after the last one.
+  _effectiveFull(check, full) { return full <= check ? check : Math.ceil(full / check) * check; }
+
+  // Descriptions follow both sliders, so the numbers always match what will happen.
+  _describeModes() {
     const $ = this.$;
-    const every = n === 1 ? "every minute" : `every ${n} minutes`;
-    const fullEvery = n >= 15 ? n : Math.ceil(15 / n) * n;
+    const n = +$("interval").value, f = +$("fullSweep").value;
+    const eff = this._effectiveFull(n, f);
+    const every = (m) => (m === 1 ? "every minute" : `every ${m} minutes`);
     $("intervalLabel").textContent = this._minutes(n);
-    $("lightText").innerHTML = n >= 15
-      ? `Searches your whole network ${every}, finding new devices too. Keeps the list and the
+    $("fullLabel").textContent = this._minutes(f);
+    $("lightText").innerHTML = f <= n
+      ? `Searches your whole network ${every(n)}, finding new devices each time. Keeps the list and the
          <i>Online devices</i> sensor up to date.`
-      : `Checks the devices it already knows ${every}, messaging each one directly with no broadcasts.
-         It searches the whole network for new devices every ${fullEvery} minutes. Keeps the list and the
+      : `Checks the devices it already knows ${every(n)}, messaging each one directly with no broadcasts.
+         Searches the whole network for new devices ${every(eff)}. Keeps the list and the
          <i>Online devices</i> sensor up to date.`;
     $("panelText").innerHTML = `Sends nothing to your network while nobody has this page open. While it's open,
-      it scans right away and then ${every}. The <i>Online devices</i> sensor is unavailable otherwise.`;
+      it scans right away, then ${f <= n ? `searches the whole network ${every(n)}`
+        : `checks known devices ${every(n)} and searches for new devices ${every(eff)}`}.
+      The <i>Online devices</i> sensor is unavailable otherwise.`;
+    $("fullHint").textContent = f <= n
+      ? "This is at or below the check interval, so every scan is a full search."
+      : eff !== f
+      ? `It runs with the next check after ${f} minutes, so ${every(eff)}. Pick a multiple of ${n} to match exactly.`
+      : "";
   }
 
   async _sendSettings(change) {
@@ -715,10 +735,10 @@ class NetworkDevicesPanel extends HTMLElement {
       b.classList.toggle("on", b.dataset.mode === sc.mode);
       b.disabled = !this._isAdmin;
     });
-    const minutes = Math.round(sc.interval / 60);
-    $("interval").value = minutes;
-    $("interval").disabled = !this._isAdmin;
-    this._describeModes(minutes);
+    $("interval").value = Math.round(sc.interval / 60);
+    $("fullSweep").value = Math.round((sc.full_sweep || 900) / 60);
+    $("interval").disabled = $("fullSweep").disabled = !this._isAdmin;
+    this._describeModes();
     $("scanStatus").textContent = this._scanSummary();
     $("notAdmin").hidden = this._isAdmin;
   }

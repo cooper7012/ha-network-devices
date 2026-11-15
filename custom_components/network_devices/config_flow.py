@@ -18,7 +18,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .const import CONF_SCAN_INTERVAL, CONF_SCAN_MODE, CONF_SUBNETS, DOMAIN, SCAN_MODES
+from .const import CONF_FULL_SWEEP, CONF_SCAN_INTERVAL, CONF_SCAN_MODE, CONF_SUBNETS, DOMAIN, SCAN_MODES
 from .coordinator import settings_from_options
 from .models import async_load_vendor_db
 from .scanner import NetworkScanner, ScanError, async_local_networks, parse_subnets
@@ -95,12 +95,13 @@ class NetworkDevicesOptionsFlow(OptionsFlow):
                     data={
                         CONF_SCAN_MODE: user_input[CONF_SCAN_MODE],
                         CONF_SCAN_INTERVAL: int(user_input["scan_minutes"]) * 60,
+                        CONF_FULL_SWEEP: int(user_input["full_sweep_minutes"]) * 60,
                     }
                 )
             errors["base"] = error
             placeholders.update(extra)
         cur = user_input or {}
-        mode, interval = settings_from_options(entry.options)
+        mode, interval, full_sweep = settings_from_options(entry.options)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -113,6 +114,12 @@ class NetworkDevicesOptionsFlow(OptionsFlow):
                     ),
                     vol.Required("scan_minutes", default=cur.get("scan_minutes", interval // 60)): NumberSelector(
                         NumberSelectorConfig(min=1, max=30, step=1, unit_of_measurement="min",
+                                             mode=NumberSelectorMode.SLIDER)
+                    ),
+                    vol.Required(
+                        "full_sweep_minutes", default=cur.get("full_sweep_minutes", full_sweep // 60)
+                    ): NumberSelector(
+                        NumberSelectorConfig(min=1, max=60, step=1, unit_of_measurement="min",
                                              mode=NumberSelectorMode.SLIDER)
                     ),
                 }
