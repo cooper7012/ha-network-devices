@@ -140,9 +140,10 @@ class NetworkDevicesPanel extends HTMLElement {
     this._built = true;
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:block; height:100%; background:var(--primary-background-color); color:var(--primary-text-color);
+        /* Fill the screen; only the table rows scroll, everything above them stays put. */
+        :host { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; background:var(--primary-background-color); color:var(--primary-text-color);
                 font-family:var(--paper-font-body1_-_font-family, Roboto, sans-serif); --chip:var(--secondary-background-color, #eee); }
-        header { display:flex; align-items:center; gap:8px; height:56px; padding:0 12px; box-sizing:border-box;
+        header { flex:none; display:flex; align-items:center; gap:8px; height:56px; padding:0 12px; box-sizing:border-box;
                  background:var(--app-header-background-color, var(--primary-color)); color:var(--app-header-text-color, #fff);
                  border-bottom:var(--app-header-border-bottom, none); }
         header h1 { font-size:20px; font-weight:400; margin:0 0 0 4px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -152,9 +153,12 @@ class NetworkDevicesPanel extends HTMLElement {
         .icon-btn:disabled { opacity:.4; cursor:default; }
         header .icon-btn.spin ha-icon { animation:spin 1s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }
-        main { padding:16px; box-sizing:border-box; max-width:1300px; margin:0 auto; }
-        .card { background:var(--card-background-color, #fff); border-radius:var(--ha-card-border-radius, 12px);
+        main { flex:1; min-height:0; display:flex; flex-direction:column; width:100%; max-width:1300px; margin:0 auto;
+               padding:16px; box-sizing:border-box; }
+        .card { display:flex; flex-direction:column; min-height:0; max-height:100%;
+                background:var(--card-background-color, #fff); border-radius:var(--ha-card-border-radius, 12px);
                 box-shadow:var(--ha-card-box-shadow, none); border:1px solid var(--divider-color); }
+        .card > :not(.scroll) { flex:none; }
         .toolbar { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--divider-color); }
         input[type=search], input[type=text], select { padding:8px 12px; font:inherit; color:inherit; border-radius:8px; min-width:0;
                 border:1px solid var(--divider-color); background:var(--primary-background-color); box-sizing:border-box; }
@@ -200,10 +204,12 @@ class NetworkDevicesPanel extends HTMLElement {
                  border-top:1px solid var(--divider-color); border-bottom:1px solid var(--divider-color); }
         .stats b { color:var(--primary-text-color); font-weight:500; }
         .err { padding:10px 16px; background:var(--error-color, #db4437); color:#fff; font-size:14px; }
-        .scroll { overflow-x:auto; }
+        .scroll { flex:0 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;
+                  border-radius:0 0 var(--ha-card-border-radius, 12px) var(--ha-card-border-radius, 12px); }
         table { width:100%; border-collapse:collapse; font-size:14px; }
         th { text-align:left; font-weight:500; font-size:13px; color:var(--secondary-text-color); padding:10px 12px; white-space:nowrap;
-             cursor:pointer; user-select:none; border-bottom:1px solid var(--divider-color); }
+             cursor:pointer; user-select:none; position:sticky; top:0; z-index:2;
+             background:var(--card-background-color, #fff); box-shadow:inset 0 -1px 0 var(--divider-color); }
         th.nosort { cursor:default; }
         th:hover:not(.nosort) { color:var(--primary-text-color); }
         th .arrow { display:inline-block; width:12px; color:var(--primary-color); }
